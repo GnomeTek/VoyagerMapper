@@ -335,10 +335,19 @@
     },
     getView() { const c = map.getCenter(); return [c.lat, c.lng, map.getZoom()]; },
     setTheme(cssFilter) { map.getPane('tilePane').style.filter = cssFilter || 'none'; },
-    showTilesGrid(on) { if (on && !window._grid) { window._grid = L.gridLayer({ tileSize: 256 }); window._grid.createTile = function (c) {
-        const d = document.createElement('div'); d.style.outline = '1px solid rgba(0,0,0,.25)'; d.style.font = '10px monospace';
-        d.innerHTML = `${c.z}/${c.x}/${c.y}`; return d; }; window._grid.addTo(map); }
-      else if (!on && window._grid) { window._grid.remove(); window._grid = null; } }
+    showTilesGrid(on) {
+      if (on && !window._grid) {
+        // own pane above tiles, vector overlays and markers (tooltips/popups stay on top); never intercepts the mouse
+        if (!map.getPane('gridPane')) { const pane = map.createPane('gridPane'); pane.style.zIndex = 625; pane.style.pointerEvents = 'none'; }
+        window._grid = L.gridLayer({ tileSize: 256, pane: 'gridPane' });
+        window._grid.createTile = function (c) {
+          const d = document.createElement('div');
+          d.style.cssText = 'outline:1px solid rgba(0,0,0,.45); font:10px monospace; color:#000; ' +
+                            'text-shadow:0 0 2px #fff,0 0 2px #fff; padding:1px 2px; box-sizing:border-box';
+          d.textContent = `${c.z}/${c.x}/${c.y}`; return d; };
+        window._grid.addTo(map);
+      } else if (!on && window._grid) { window._grid.remove(); window._grid = null; }
+    }
   };
 
   new QWebChannel(qt.webChannelTransport, ch => {
