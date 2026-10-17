@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>voymap</title>
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="vendor/leaflet-geoman.css">
+<style>
+  html, body, #map { height: 100%; margin: 0; }
+  #status { position:absolute; left:8px; bottom:8px; z-index:1000; background:rgba(255,255,255,.9);
+            font: 12px/1.3 system-ui, sans-serif; padding:4px 8px; border-radius:4px; }
+  #err { position:absolute; left:8px; top:8px; z-index:1000; background:#ffe; color:#900;
+         font: 12px system-ui; padding:4px 8px; border-radius:4px; display:none; max-width:60%; }
+  .export-area { stroke: #d400ff; stroke-dasharray: 6 6; fill: #d400ff; fill-opacity: .05; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="status">loading…</div>
+<div id="err"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="vendor/leaflet.js"></script>
+<script src="vendor/leaflet-geoman.min.js"></script>
+<script>
+(function () {
+  const errBox = document.getElementById('err');
+  function showErr(m) { errBox.style.display = 'block'; errBox.textContent = m; }
+  window.addEventListener('error', e => showErr('JS error: ' + e.message));
+  if (typeof L === 'undefined') { showErr('Leaflet failed to load (no internet?).'); return; }
+
+  // ---- ArcGIS dynamic export as a tile layer --------------------------------
+  const R = 6378137 * Math.PI;
+  const ArcGISExport = L.TileLayer.extend({
+    initialize(base, params, opts) { this._base = base; this._params = params || {}; L.TileLayer.prototype.initialize.call(this, '', opts); },
+    getTileUrl(c) {
+      const n = 1 << c.z, size = 2 * R / n;
+      const xmin = -R + c.x * size, xmax = xmin + size, ymax = R - c.y * size, ymin = ymax - size;
+      const p = Object.assign({ bbox: `${xmin},${ymin},${xmax},${ymax}`, bboxSR: 3857, imageSR: 3857,
+        size: '256,256', format: 'png32', transparent: this.options.opaque ? 'false' : 'true', dpi: 96, f: 'image' }, this._params);
+      return this._base.replace(/\/$/, '') + '/export?' + Object.entries(p).map(([k, v]) => k + '=' + v).join('&');
+    }
+  });
+
+  // ---- map -------------------------------------------------------------------
+  const map = L.map('map', { zoomControl: true, preferCanvas: false }).setView([35.2, -111.65], 11);
+  L.control.scale({ imperial: true, metric: true }).addTo(map);
+  map.pm.addControls({ position: 'topleft', drawCircle: false, drawCircleMarker: false, drawText: false,
+    cutPolygon: false, rotateMode: false, drawRectangle: false });
+  map.pm.setGlobalOptions({ snappable: true, allowSelfIntersection: true, markerStyle: { draggable: true } });
+
+  const sources = {};       // id -> spec
+  const tileLayers = {};    // id -> L.TileLayer
+  let layerOrder = [];      // [{id, opacity, visible}] bottom -> top
+  const features = L.featureGroup().addTo(map);   // user features (tracks, waypoints, polygons)
+  let exportArea = null;    // L.Rectangle or L.Polygon
+  let bridge = null;
+  let selectedId = null;
+  let suppress = false;
+
+  function send(name, ...args) { if (bridge && bridge[name]) bridge[name](...args); }
+
+  function featureStyle(props) {
+    const s = (props && props.style) || {};
+    return { color: s.color || '#ff0000', weight: s.width || 3, opacity: s.opacity == null ? 1 : s.opacity,
+             dashArray: s.dash ? s.dash.join(' ') : null, fillOpacity: s.fill_opacity == null ? 0.15 : s.fill_opacity };
+  }
+  function markerStyle(props) {
+    const s = (props && props.style) || {};
+    return { radius: (s.size || 10) / 2, color: '#fff', weight: 2, fillColor: s.color || '#ff6600', fillOpacity: 1 };
+  }
+
+  function newId() { return 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  function decorate(layer, props) {
+    if (!layer.feature) layer.feature = { type: 'Feature', properties: {} };
+    Object.assign(layer.feature.properties, props || {});
+    const p = layer.feature.properties;
+    if (!p.id) p.id = newId();
+    if (p.visible == null) p.visible = true;
+    if (!p.style) p.style = {};
+    if (layer instanceof L.CircleMarker) layer.setStyle(markerStyle(p));
+    else if (layer.setStyle) layer.setStyle(featureStyle(p));
+    if (p.name && layer.bindTooltip) layer.bindTooltip(p.name, { permanent: layer instanceof L.CircleMarker, direction: 'right', offset: [8, 0] });
+    layer.on('click', () => { selectedId = p.id; send('featureSelected', p.id); });
+  }
+
+  function featuresGeoJSON() {
+    const out = [];
+    features.eachLayer(l => {
+      const gj = l.toGeoJSON();
+      gj.id = l.feature.properties.id;
+      gj.properties = Object.assign({}, l.feature.properties);
+      out.push(gj);
+    });
+    return { type: 'FeatureCollection', features: out };
+  }
+  function emitFeatures() { if (!suppress) send('featuresChanged', JSON.stringify(featuresGeoJSON())); }
+
+  map.on('pm:create', e => {
+    let layer = e.layer;
+    if (e.shape === 'Marker') {            // replace the default marker with a styled circle marker
+      const ll = layer.getLatLng(); layer.remove();
+      layer = L.circleMarker(ll, markerStyle({})); layer.addTo(map);
+      decorate(layer, { name: 'WPT ' + (features.getLayers().filter(l => l instanceof L.CircleMarker).length + 1) });
+      layer.pm.enable({ draggable: true });
+    } else if (e.shape === 'Rectangle' && drawingExportArea) {
+      drawingExportArea = false; setExportAreaLayer(layer); return;
+    } else {
+      decorate(layer, { name: (e.shape === 'Polygon' ? 'Area ' : 'Track ') + (features.getLayers().length + 1) });
+    }
+    layer.remove(); features.addLayer(layer);
+    layer.on('pm:edit pm:dragend pm:markerdragend', emitFeatures);
+    emitFeatures();
+    selectedId = layer.feature.properties.id; send('featureSelected', selectedId);
+  });
+  map.on('pm:remove', e => { if (features.hasLayer(e.layer)) { features.removeLayer(e.layer); emitFeatures(); }
+                             if (e.layer === exportArea) { exportArea = null; send('exportAreaChanged', 'null'); } });
+  features.on('pm:edit', emitFeatures);
+
+  // ---- export area -------------------------------------------------------------
+  let drawingExportArea = false;
+  function setExportAreaLayer(layer) {
+    if (exportArea) exportArea.remove();
+    exportArea = layer; layer.setStyle({ className: 'export-area', color: '#d400ff', weight: 2, dashArray: '6 6', fillOpacity: .05 });
+    layer.addTo(map);
+    layer.on('pm:edit pm:dragend', emitExportArea);
+    emitExportArea();
+  }
+  function emitExportArea() {
+    if (!exportArea) { send('exportAreaChanged', 'null'); return; }
+    const b = exportArea.getBounds();
+    const ring = (exportArea instanceof L.Rectangle) ? null :
+      exportArea.getLatLngs()[0].map(p => [p.lng, p.lat]);
+    send('exportAreaChanged', JSON.stringify({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth(), ring }));
+  }
+
+  map.on('moveend zoomend', () => {
+    const c = map.getCenter(), z = map.getZoom();
+    document.getElementById('status').textContent = `z${z}  ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`;
+    send('viewChanged', c.lat, c.lng, z);
+  });
+
+  // ---- API called from Python ------------------------------------------------------
+  window.vm = {
+    setSources(list) {
+      for (const s of list) {
+        sources[s.id] = s;
+        if (tileLayers[s.id]) continue;
+        const opts = { maxZoom: 19, maxNativeZoom: s.maxZoom, minZoom: 0, attribution: s.attribution, opaque: s.opaque,
+                       subdomains: s.subdomains || 'abc', crossOrigin: false };
+        tileLayers[s.id] = s.kind === 'arcgis_export' ? new ArcGISExport(s.url, s.exportParams, opts)
+                                                       : L.tileLayer(s.url, opts);
+      }
+    },
+    setLayers(order) {          // bottom -> top
+      layerOrder = order;
+      for (const id in tileLayers) if (!order.find(o => o.id === id && o.visible)) tileLayers[id].remove();
+      order.forEach((o, i) => {
+        const tl = tileLayers[o.id]; if (!tl) return;
+        if (!o.visible) { tl.remove(); return; }
+        tl.setOpacity(o.opacity == null ? 1 : o.opacity);
+        if (!map.hasLayer(tl)) tl.addTo(map);
+        tl.setZIndex(i + 1);
+      });
+    },
+    loadFeatures(gj) {        // replace all features
+      suppress = true;
+      features.clearLayers();
+      L.geoJSON(gj, {
+        pointToLayer: (f, ll) => L.circleMarker(ll, markerStyle(f.properties)),
+        onEachFeature: (f, layer) => {
+          const props = Object.assign({}, f.properties, { id: f.id || f.properties.id });
+          decorate(layer, props);
+          layer.on('pm:edit pm:dragend pm:markerdragend', emitFeatures);
+          features.addLayer(layer);
+        }
+      });
+      suppress = false;
+    },
+    updateFeature(id, props) {
+      features.eachLayer(l => {
+        if (l.feature.properties.id !== id) return;
+        Object.assign(l.feature.properties, props);
+        const p = l.feature.properties;
+        if (l instanceof L.CircleMarker) l.setStyle(markerStyle(p)); else l.setStyle(featureStyle(p));
+        if (l.getTooltip()) l.setTooltipContent(p.name || ''); else if (p.name) l.bindTooltip(p.name);
+        if (p.visible === false) l.setStyle({ opacity: 0.25, fillOpacity: 0.05 });
+      });
+      emitFeatures();
+    },
+    removeFeature(id) { features.eachLayer(l => { if (l.feature.properties.id === id) features.removeLayer(l); }); emitFeatures(); },
+    zoomToFeature(id) { features.eachLayer(l => { if (l.feature.properties.id === id) {
+        if (l.getBounds) map.fitBounds(l.getBounds().pad(0.2)); else map.setView(l.getLatLng(), Math.max(map.getZoom(), 14)); } }); },
+    zoomTo(w, s, e, n) { map.fitBounds([[s, w], [n, e]]); },
+    setView(lat, lon, z) { map.setView([lat, lon], z); },
+    startDraw(kind) { map.pm.enableDraw(kind); },   // 'Line' | 'Marker' | 'Polygon'
+    startExportRect() { drawingExportArea = true; map.pm.enableDraw('Rectangle'); },
+    setExportArea(w, s, e, n) { setExportAreaLayer(L.rectangle([[s, w], [n, e]])); },
+    clearExportArea() { if (exportArea) { exportArea.remove(); exportArea = null; } send('exportAreaChanged', 'null'); },
+    getView() { const c = map.getCenter(); return [c.lat, c.lng, map.getZoom()]; },
+    showTilesGrid(on) { if (on && !window._grid) { window._grid = L.gridLayer({ tileSize: 256 }); window._grid.createTile = function (c) {
+        const d = document.createElement('div'); d.style.outline = '1px solid rgba(0,0,0,.25)'; d.style.font = '10px monospace';
+        d.innerHTML = `${c.z}/${c.x}/${c.y}`; return d; }; window._grid.addTo(map); }
+      else if (!on && window._grid) { window._grid.remove(); window._grid = null; } }
+  };
+
+  new QWebChannel(qt.webChannelTransport, ch => {
+    bridge = ch.objects.bridge;
+    document.getElementById('status').textContent = 'ready';
+    send('ready');
+  });
+})();
+</script>
+</body>
+</html>
