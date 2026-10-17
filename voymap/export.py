@@ -43,6 +43,7 @@ class ExportSpec:
     features: list[Feature] = field(default_factory=list)
     encoding: str = "png8"
     jpeg_quality: int = 80
+    png_colors: int = 256     # palette size for png8
     polygon: Optional[list[tuple[float, float]]] = None  # optional clip ring (lon,lat)
     refresh: bool = False
     spec_extras: bool = False
@@ -53,12 +54,23 @@ class ExportSpec:
     # Snap the area outward to the tile grid of this zoom so every zoom >= snap_zoom
     # covers exactly the same rectangle (CalTopo snaps only at its max zoom). None = no snapping.
     snap_zoom: Optional[int] = 11
+    # For zooms below the snap zoom, make the part of each tile outside the snapped
+    # area transparent so every zoom shows the same extent. UNTESTED on the device:
+    # CalTopo never writes partially transparent tiles.
+    trim_coarse: bool = False
+
+    def effective_snap_zoom(self) -> Optional[int]:
+        if self.snap_zoom is None:
+            return None
+        return min(max(self.snap_zoom, self.zmin), self.zmax)
 
     def effective_bbox(self) -> BBox:
-        if self.snap_zoom is None:
-            return self.bbox
-        z = min(max(self.snap_zoom, self.zmin), self.zmax)
-        return self.bbox.snapped(z)
+        z = self.effective_snap_zoom()
+        return self.bbox if z is None else self.bbox.snapped(z)
+
+    def per_zoom_counts(self) -> list[tuple[int, int]]:
+        bbox = self.effective_bbox()
+        return [(z, bbox.tile_count(z)) for z in range(self.zmin, self.zmax + 1)]
 
     def variant(self, theme: str, suffix: str) -> "ExportSpec":
         """Copy of this spec with another theme and an output-name suffix."""
@@ -173,7 +185,7 @@ class ExportJob:
 
         # Phase 2: composite + overlay + encode + write.
         renderer = OverlayRenderer(spec.features)
-        encoder = TileEncoder(spec.encoding, spec.jpeg_quality)
+        encoder = TileEncoder(spec.encoding, spec.jpeg_quality, spec.png_colors)
         written = 0
         with MBTilesWriter(spec.output, spec.name, spec.effective_bbox(), encoder,
                            description=spec.description, spec_extras=spec.spec_extras,
@@ -192,6 +204,8 @@ class ExportJob:
                 if img is None:
                     img = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (235, 235, 235, 255))
                 img = apply_theme(img, spec.theme)
+                if spec.trim_coarse and spec.effective_snap_zoom() is not None and z < spec.effective_snap_zoom():
+                    img = _trim_outside(img, x, y, z, spec.effective_bbox())
                 if ov is not None:
                     img = Image.alpha_composite(img, ov)
                 writer.add_image_xyz(x, y, z, img)
@@ -231,3 +245,23 @@ class ExportJob:
                 out = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (255, 255, 255, 255))
             out = Image.alpha_composite(out, tile)
         return out
+
+
+def _trim_outside(img: Image.Image, x: int, y: int, z: int, bbox: BBox) -> Image.Image:
+    """Set alpha to 0 for the part of tile (x, y, z) that lies outside bbox."""
+    from .tilemath import lonlat_to_pixel
+    ox, oy = x * TILE_SIZE, y * TILE_SIZE
+    px0, py0 = lonlat_to_pixel(bbox.west, bbox.north, z)
+    px1, py1 = lonlat_to_pixel(bbox.east, bbox.south, z)
+    l = max(0, int(round(px0 - ox))); t = max(0, int(round(py0 - oy)))
+    r = min(TILE_SIZE, int(round(px1 - ox))); b = min(TILE_SIZE, int(round(py1 - oy)))
+    if l <= 0 and t <= 0 and r >= TILE_SIZE and b >= TILE_SIZE:
+        return img
+    mask = Image.new("L", (TILE_SIZE, TILE_SIZE), 0)
+    if r > l and b > t:
+        mask.paste(255, (l, t, r, b))
+    out = img.copy()
+    alpha = out.getchannel("A")
+    from PIL import ImageChops
+    out.putalpha(ImageChops.multiply(alpha, mask))
+    return out

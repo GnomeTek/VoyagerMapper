@@ -70,12 +70,13 @@ def cmd_export(a):
     spec = ExportSpec(
         output=Path(a.output), name=a.name or Path(a.output).stem, bbox=bbox,
         zmin=zmin, zmax=zmax, layers=_parse_layers(a.layers), features=feats,
-        encoding=a.encoding, jpeg_quality=a.jpeg_quality, refresh=a.refresh,
+        encoding=a.encoding, jpeg_quality=a.jpeg_quality, png_colors=a.png_colors, refresh=a.refresh,
         spec_extras=a.spec_extras, skip_empty=not a.write_empty,
         cache_dir=Path(a.cache_dir) if a.cache_dir else None,
     )
     spec.theme = a.theme
     spec.snap_zoom = None if a.no_snap else a.snap_zoom
+    spec.trim_coarse = a.trim_coarse
     est = spec.estimate()
     eb = spec.effective_bbox()
     print(f"area {bbox.as_tuple()}", file=sys.stderr)
@@ -143,6 +144,7 @@ def main(argv=None):
     e.add_argument("--name", help="map name shown on the device (default: output filename stem)")
     e.add_argument("--encoding", choices=("png8", "png", "jpeg"), default="png8")
     e.add_argument("--jpeg-quality", type=int, default=80)
+    e.add_argument("--png-colors", type=int, default=256, help="palette size for png8 (CalTopo: 256)")
     e.add_argument("--theme", choices=("day", "night", "dim"), default="day",
                    help="tile colour theme; night = inverted luminance with hues kept")
     e.add_argument("--both-themes", action="store_true",
@@ -151,6 +153,8 @@ def main(argv=None):
                    help="snap the area outward to this zoom's tile grid so all zooms >= it cover the same "
                         "rectangle (CalTopo snaps only at its max zoom); clamped to the zoom range")
     e.add_argument("--no-snap", action="store_true", help="no snapping: each zoom takes the tiles touching the bbox")
+    e.add_argument("--trim-coarse", action="store_true",
+                   help="make the part of coarse-zoom tiles outside the snapped area transparent (untested on device)")
     e.add_argument("--refresh", action="store_true", help="ignore the tile cache and re-download")
     e.add_argument("--spec-extras", action="store_true", help="also write minzoom/maxzoom/center metadata (untested on device)")
     e.add_argument("--write-empty", action="store_true", help="write grey tiles where no layer has data")

@@ -63,7 +63,18 @@ voymap gui          # or: python -m voymap gui
 4. Copy the `.mbtiles` to the Voyager Pro microSD card. On the device: map
    screen → **CUSTOM MAPS** → **IMPORT A NEW FILE**.
 
-`File → Save project` stores features, layers and export settings as
+**Advanced options** (fold-out in the Export panel) hold the rest: JPEG
+quality, png8 palette size, trimming coarse-zoom tiles to the area
+(transparent outside; untested on the device), grey tiles where no layer has
+data, the extra metadata keys, forcing a re-download, the padding used by
+"Area = tracks extent", the MBTiles description, and the tile cache (location,
+open, clear). Every option the command line has is in the app.
+
+**Source details…** (Layers panel, or `File → Tile sources…`) lists every
+source's URL, zoom range, rate limit and notes, and creates/opens the custom
+sources file for adding your own.
+
+`File → Save project` stores features, layers and all export settings as
 `*.voymap.json` so you can rebuild later.
 
 If the map area stays blank, click **Test sources** in the Layers panel: it

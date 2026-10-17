@@ -117,3 +117,21 @@ def test_theme_pair_export(tmp_path):
     blue = Image.new("RGBA", (4, 4), (40, 120, 220, 255))
     r, g, b = apply_theme(blue, "night").convert("RGB").getpixel((0, 0))
     assert b > r and b > g
+
+
+def test_trim_coarse_makes_outside_transparent(tmp_path):
+    bbox = BBox(-111.66, 35.19, -111.64, 35.21)
+    base = TileSource(id="fb2", name="fb", kind="xyz", url="http://invalid/{z}/{x}/{y}", max_zoom=14)
+    cache_dir = tmp_path / "cache"
+    spec = ExportSpec(output=tmp_path / "t.mbtiles", name="T", bbox=bbox, zmin=9, zmax=12,
+                      layers=[LayerSpec("fb2")], cache_dir=cache_dir, snap_zoom=12, trim_coarse=True)
+    _seed(cache_dir, base, spec.effective_bbox(), 9, 12, (255, 255, 255, 255))
+    ExportJob(spec, sources={"fb2": base}).run()
+    from voymap.tilemath import lonlat_to_tile
+    x, y = lonlat_to_tile(-111.65, 35.20, 9)
+    im = Image.open(io.BytesIO(read_tile_xyz(tmp_path / "t.mbtiles", x, y, 9))).convert("RGBA")
+    alphas = {px[3] for px in im.get_flattened_data()}
+    assert 0 in alphas and 255 in alphas            # partly transparent, partly opaque
+    x, y = lonlat_to_tile(-111.65, 35.20, 12)        # at/above the snap zoom: untouched
+    im = Image.open(io.BytesIO(read_tile_xyz(tmp_path / "t.mbtiles", x, y, 12))).convert("RGBA")
+    assert im.getchannel("A").getextrema() == (255, 255)

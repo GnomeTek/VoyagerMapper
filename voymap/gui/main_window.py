@@ -10,10 +10,11 @@ from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-                               QScrollArea, QSizePolicy, QSlider, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
+                               QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
+                               QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..export import AVG_TILE_BYTES, ExportJob, ExportSpec, LayerSpec, Progress
@@ -25,7 +26,8 @@ from ..themes import THEMES, css_filter
 from ..tilemath import BBox
 from .bridge import Bridge
 from .server import LocalServer
-from ..fetch import TileFetcher
+from ..fetch import TileFetcher, default_cache_dir
+from ..sources import user_sources_path, write_user_sources_template
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -184,6 +186,12 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: #666; font-size: 11px")
         hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         lay.addWidget(hint)
+        srow = QHBoxLayout()
+        b = QPushButton("Source details…")
+        b.setToolTip("URLs, zoom ranges, usage notes, and how to add your own sources")
+        b.clicked.connect(self._show_sources_dialog)
+        srow.addWidget(b)
+        lay.addLayout(srow)
         test_btn = QPushButton("Test sources (fetch one tile each)")
         test_btn.setToolTip("Downloads one tile at the current map centre for every checked layer through "
                             "the Python fetcher and reports the HTTP result. Separates a page problem from a network one.")
@@ -285,11 +293,55 @@ class MainWindow(QMainWindow):
         form.addRow("Theme", self.e_theme)
         self.e_both = QCheckBox("export a day + night pair (<name>_day / <name>_night)")
         form.addRow("", self.e_both)
-        self.e_extras = QCheckBox("write minzoom/maxzoom/center metadata (untested on device)")
-        form.addRow("", self.e_extras)
-        self.e_refresh = QCheckBox("ignore tile cache (re-download)")
-        form.addRow("", self.e_refresh)
         lay.addLayout(form)
+
+        # -- Advanced (collapsed by default)
+        self.adv_btn = QToolButton()
+        self.adv_btn.setText("Advanced options")
+        self.adv_btn.setCheckable(True)
+        self.adv_btn.setArrowType(Qt.RightArrow)
+        self.adv_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.adv_btn.setStyleSheet("QToolButton { border: none; font-weight: bold }")
+        lay.addWidget(self.adv_btn)
+        self.adv_box = QWidget()
+        adv = QFormLayout(self.adv_box)
+        adv.setContentsMargins(12, 0, 0, 0)
+        self.e_jpegq = QSpinBox(); self.e_jpegq.setRange(30, 100); self.e_jpegq.setValue(80)
+        self.e_jpegq.setToolTip("Only used with the jpeg encoding")
+        adv.addRow("JPEG quality", self.e_jpegq)
+        self.e_colors = QSpinBox(); self.e_colors.setRange(16, 256); self.e_colors.setValue(256)
+        self.e_colors.setToolTip("Palette size for png8 (CalTopo uses 256; fewer = smaller files, more banding)")
+        adv.addRow("png8 colours", self.e_colors)
+        self.e_trim = QCheckBox("trim coarse zooms to the area (transparent; untested on device)")
+        self.e_trim.setToolTip("Zooms below the snap zoom take whole tiles that overshoot the area. This paints the "
+                               "overshoot transparent so every zoom shows the same extent. CalTopo never writes "
+                               "partially transparent tiles, so test it on a small export first.")
+        adv.addRow("", self.e_trim)
+        self.e_write_empty = QCheckBox("write grey tiles where no layer has data")
+        adv.addRow("", self.e_write_empty)
+        self.e_extras = QCheckBox("write minzoom/maxzoom/center metadata (untested)")
+        adv.addRow("", self.e_extras)
+        self.e_refresh = QCheckBox("ignore tile cache (re-download everything)")
+        adv.addRow("", self.e_refresh)
+        self.e_pad = QDoubleSpinBox(); self.e_pad.setRange(0, 1); self.e_pad.setDecimals(3)
+        self.e_pad.setSingleStep(0.005); self.e_pad.setValue(0.01); self.e_pad.setSuffix(" °")
+        self.e_pad.setToolTip("Padding around the tracks when using 'Area = tracks extent' (0.01° ≈ 1 km)")
+        adv.addRow("Extent padding", self.e_pad)
+        self.e_desc = QLineEdit("N/A")
+        self.e_desc.setToolTip("MBTiles metadata 'description' (CalTopo writes N/A)")
+        adv.addRow("Description", self.e_desc)
+        crow = QHBoxLayout()
+        self.cache_label = QLabel()
+        self.cache_label.setWordWrap(True)
+        b = QPushButton("Open cache folder"); b.clicked.connect(self._open_cache); crow.addWidget(b)
+        b = QPushButton("Clear cache…"); b.clicked.connect(self._clear_cache); crow.addWidget(b)
+        adv.addRow("Tile cache", self.cache_label)
+        adv.addRow("", crow)
+        self.adv_box.setVisible(False)
+        self.adv_btn.toggled.connect(lambda on: (self.adv_box.setVisible(on),
+                                                 self.adv_btn.setArrowType(Qt.DownArrow if on else Qt.RightArrow)))
+        lay.addWidget(self.adv_box)
+        self._refresh_cache_label()
 
         arow = QHBoxLayout()
         b = QPushButton("Draw export rectangle")
@@ -307,7 +359,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.area_label)
         self.estimate_label = QLabel("")
         self.estimate_label.setStyleSheet("font-weight: bold")
+        self.estimate_label.setWordWrap(True)
         lay.addWidget(self.estimate_label)
+        self.zoom_table = QLabel("")
+        self.zoom_table.setStyleSheet("font-family: monospace; color: #444; font-size: 11px")
+        lay.addWidget(self.zoom_table)
 
         self.export_btn = QPushButton("Export MBTiles…")
         self.export_btn.clicked.connect(self._start_export)
@@ -339,6 +395,7 @@ class MainWindow(QMainWindow):
                               ("Save project", self._save_project, "Ctrl+S"),
                               ("Save project as…", self._save_project_as, "Ctrl+Shift+S"),
                               ("Inspect MBTiles…", self._inspect_mbtiles, None),
+                              ("Tile sources…", self._show_sources_dialog, None),
                               ("Quit", self.close, "Ctrl+Q")):
             a = QAction(text, self)
             if key:
@@ -388,6 +445,77 @@ class MainWindow(QMainWindow):
     @Slot(float, float, int)
     def _on_view_changed(self, lat, lon, z):
         self.settings.setValue("view", json.dumps([lat, lon, z]))
+
+    # ------------------------------------------------------------------ cache & sources
+    def _refresh_cache_label(self):
+        d = default_cache_dir()
+        total = sum(f.stat().st_size for f in d.glob("*.sqlite")) if d.exists() else 0
+        self.cache_label.setText(f"{d}\n{total / 1e6:.0f} MB in {len(list(d.glob('*.sqlite'))) if d.exists() else 0} source file(s)")
+
+    def _open_cache(self):
+        from PySide6.QtGui import QDesktopServices
+        d = default_cache_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(d)))
+
+    def _clear_cache(self):
+        d = default_cache_dir()
+        files = list(d.glob("*.sqlite*")) if d.exists() else []
+        if not files:
+            QMessageBox.information(self, "Tile cache", "The cache is already empty.")
+            return
+        if QMessageBox.question(self, "Clear tile cache",
+                                f"Delete {len(files)} cache file(s) in\n{d}?\n\nThe next export re-downloads every tile.") != QMessageBox.Yes:
+            return
+        for f in files:
+            try:
+                f.unlink()
+            except OSError as e:
+                QMessageBox.warning(self, "Tile cache", f"{f.name}: {e}")
+        self._refresh_cache_label()
+
+    def _show_sources_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Tile sources")
+        dlg.resize(760, 520)
+        v = QVBoxLayout(dlg)
+        txt = QPlainTextEdit()
+        txt.setReadOnly(True)
+        lines = []
+        for src in self.sources.values():
+            lines.append(f"{src.id}  —  {src.name}")
+            lines.append(f"    kind {src.kind}   zoom {src.min_zoom}-{src.max_zoom}   "
+                         f"{'base' if src.opaque else 'overlay'}   {'' if src.bulk_ok else 'PREVIEW ONLY (not offered)'}")
+            lines.append(f"    rate {src.rate_limit} req/s, {src.max_workers} workers   {src.attribution}")
+            lines.append(f"    {src.url}")
+            if src.export_params:
+                lines.append(f"    export params: {src.export_params}")
+            if src.notes:
+                lines.append(f"    {src.notes}")
+            lines.append("")
+        p = user_sources_path()
+        lines.append(f"Custom / overriding sources file: {p}  ({'exists' if p.exists() else 'not created yet'})")
+        lines.append("Each entry there has the same fields as above (id, name, kind, url, min_zoom, max_zoom, opaque, ...). "
+                     "An entry whose id matches a built-in one replaces it. Restart the app after editing.")
+        txt.setPlainText("\n".join(lines))
+        v.addWidget(txt)
+        row = QHBoxLayout()
+        b = QPushButton("Create / open custom sources file")
+        b.clicked.connect(lambda: self._open_user_sources())
+        row.addWidget(b)
+        row.addStretch()
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        row.addWidget(bb)
+        v.addLayout(row)
+        dlg.exec()
+
+    def _open_user_sources(self):
+        from PySide6.QtGui import QDesktopServices
+        p = user_sources_path()
+        if not p.exists():
+            write_user_sources_template(p)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
 
     # ------------------------------------------------------------------ diagnostics
     def _test_sources(self):
@@ -546,7 +674,11 @@ class MainWindow(QMainWindow):
                 "layers": [{"id": r.src.id, "visible": r.visible, "opacity": r.opacity} for r in self.layer_rows],
                 "export": {"name": self.e_name.text(), "zmin": self.e_zmin.value(), "zmax": self.e_zmax.value(),
                            "encoding": self.e_encoding.currentIndex(), "theme": self.e_theme.currentIndex(),
-                           "snap": self.e_snap.value(), "snap_on": self.e_snap_on.isChecked()}}
+                           "snap": self.e_snap.value(), "snap_on": self.e_snap_on.isChecked(),
+                           "trim": self.e_trim.isChecked(), "jpegq": self.e_jpegq.value(),
+                           "colors": self.e_colors.value(), "write_empty": self.e_write_empty.isChecked(),
+                           "extras": self.e_extras.isChecked(), "pad": self.e_pad.value(),
+                           "desc": self.e_desc.text(), "both": self.e_both.isChecked()}}
 
     def _save_project(self):
         if not self.project_path:
@@ -583,6 +715,14 @@ class MainWindow(QMainWindow):
             self.e_theme.setCurrentIndex(e.get("theme", 0))
             self.e_snap.setValue(e.get("snap", 11))
             self.e_snap_on.setChecked(e.get("snap_on", True))
+            self.e_trim.setChecked(e.get("trim", False))
+            self.e_jpegq.setValue(e.get("jpegq", 80))
+            self.e_colors.setValue(e.get("colors", 256))
+            self.e_write_empty.setChecked(e.get("write_empty", False))
+            self.e_extras.setChecked(e.get("extras", False))
+            self.e_pad.setValue(e.get("pad", 0.01))
+            self.e_desc.setText(e.get("desc", "N/A"))
+            self.e_both.setChecked(e.get("both", False))
         self._push_features()
         a = d.get("export_area")
         if a:
@@ -597,7 +737,8 @@ class MainWindow(QMainWindow):
         if not bb:
             QMessageBox.information(self, "Export area", "No tracks or waypoints loaded.")
             return
-        bb = bb.buffered_deg(0.01, 0.01)
+        pad = self.e_pad.value()
+        bb = bb.buffered_deg(pad, pad)
         self._js(f"window.vm.setExportArea({bb.west},{bb.south},{bb.east},{bb.north})")
 
     def _current_bbox(self) -> Optional[BBox]:
@@ -625,6 +766,7 @@ class MainWindow(QMainWindow):
         bb = self._current_bbox()
         if not bb:
             self.estimate_label.setText("")
+            self.zoom_table.setText("")
             self._js("window.vm.showSnapped(null)")
             return
         zmin, zmax = self.e_zmin.value(), self.e_zmax.value()
@@ -637,6 +779,7 @@ class MainWindow(QMainWindow):
         else:
             self._js("window.vm.showSnapped(null)")
         n = sb.total_tiles(zmin, zmax)
+        self.zoom_table.setText("   ".join(f"z{z}:{sb.tile_count(z):,}" for z in range(zmin, zmax + 1)))
         layers = [r for r in self.layer_rows if r.visible and r.src.bulk_ok]
         self.estimate_label.setText(f"≈ {n:,} tiles, ≈ {n * AVG_TILE_BYTES / 1e6:.0f} MB, "
                                     f"{len(layers)} layer(s) → up to {n * len(layers):,} tile requests"
@@ -673,7 +816,10 @@ class MainWindow(QMainWindow):
                           features=[f for f in self.features if f.visible], encoding=enc,
                           polygon=[tuple(p) for p in ring] if ring else None,
                           refresh=self.e_refresh.isChecked(), spec_extras=self.e_extras.isChecked(),
-                          snap_zoom=self._snap_zoom())
+                          snap_zoom=self._snap_zoom(), trim_coarse=self.e_trim.isChecked(),
+                          jpeg_quality=self.e_jpegq.value(), png_colors=self.e_colors.value(),
+                          skip_empty=not self.e_write_empty.isChecked(),
+                          description=self.e_desc.text() or "N/A")
 
     def _theme_name(self) -> str:
         return THEMES[self.e_theme.currentIndex()]
@@ -717,6 +863,7 @@ class MainWindow(QMainWindow):
     def _on_export_done(self, results):
         self.export_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
+        self._refresh_cache_label()
         lines = []
         for spec, p in results:
             if p.phase == "done":
