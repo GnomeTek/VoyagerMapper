@@ -8,6 +8,7 @@ from typing import Optional
 from PySide6.QtCore import QSettings, Qt, QThread, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -23,8 +24,22 @@ from ..sources import load_sources
 from ..themes import THEMES, css_filter
 from ..tilemath import BBox
 from .bridge import Bridge
+from .server import LocalServer
+from ..fetch import TileFetcher
 
 WEB_DIR = Path(__file__).parent / "web"
+
+
+def _read_qrc(path: str) -> bytes:
+    """Read a file out of Qt's compiled-in resources (e.g. qwebchannel.js)."""
+    from PySide6.QtCore import QFile, QIODevice
+    f = QFile(path)
+    if not f.open(QIODevice.ReadOnly):
+        raise RuntimeError(f"cannot read Qt resource {path}")
+    try:
+        return bytes(f.readAll().data())
+    finally:
+        f.close()
 
 
 # ----------------------------------------------------------------------------
@@ -111,6 +126,11 @@ class MainWindow(QMainWindow):
 
         # -- map view
         self.view = QWebEngineView()
+        st = self.view.settings()
+        st.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+        st.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+        self.server = LocalServer(WEB_DIR, extra={"/qwebchannel.js": (_read_qrc(":/qtwebchannel/qwebchannel.js"),
+                                                                     "application/javascript")})
         self.bridge = Bridge()
         self.channel = QWebChannel()
         self.channel.registerObject("bridge", self.bridge)
@@ -128,7 +148,7 @@ class MainWindow(QMainWindow):
         self._build_export_dock()
         self._build_menu()
         self.statusBar().showMessage("loading map page…")
-        self.view.load(QUrl.fromLocalFile(str(WEB_DIR / "map.html")))
+        self.view.load(QUrl(self.server.url("map.html")))
 
     # ------------------------------------------------------------------ docks
     def _make_dock(self, title: str, content: QWidget) -> QDockWidget:
@@ -163,6 +183,11 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: #666; font-size: 11px")
         hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         lay.addWidget(hint)
+        test_btn = QPushButton("Test sources (fetch one tile each)")
+        test_btn.setToolTip("Downloads one tile at the current map centre for every checked layer through "
+                            "the Python fetcher and reports the HTTP result. Separates a page problem from a network one.")
+        test_btn.clicked.connect(self._test_sources)
+        lay.addWidget(test_btn)
         self.grid_check = QCheckBox("Show tile grid (z/x/y)")
         self.grid_check.toggled.connect(lambda on: self._js(f"window.vm.showTilesGrid({'true' if on else 'false'})"))
         lay.addWidget(self.grid_check)
@@ -347,6 +372,40 @@ class MainWindow(QMainWindow):
     @Slot(float, float, int)
     def _on_view_changed(self, lat, lon, z):
         self.settings.setValue("view", json.dumps([lat, lon, z]))
+
+    # ------------------------------------------------------------------ diagnostics
+    def _test_sources(self):
+        from ..tilemath import lonlat_to_tile
+        v = self.settings.value("view")
+        lat, lon, z = (json.loads(v) if v else (35.2, -111.65, 11))
+        z = int(min(max(z, 8), 13))
+        x, y = lonlat_to_tile(lon, lat, z)
+        lines = [f"tile z{z} x{x} y{y} at {lat:.4f}, {lon:.4f}", ""]
+        rows = [r for r in self.layer_rows if r.visible] or self.layer_rows[:1]
+        for r in rows:
+            f = TileFetcher(r.src, refresh=True, timeout=20, retries=0)
+            res = f.fetch(x, y, z)
+            if res.status == "ok":
+                lines.append(f"OK      {r.src.id}: {len(res.data):,} bytes")
+            else:
+                lines.append(f"FAIL    {r.src.id}: {res.status} {res.error}")
+            lines.append(f"        {r.src.tile_url(x, y, z)[:110]}")
+        lines.append("")
+
+        def show(stats):
+            try:
+                st = json.loads(stats) if stats else {}
+            except Exception:  # noqa: BLE001
+                st = {}
+            lines.append(f"map page: {st.get('ok', '?')} tiles loaded, {st.get('err', '?')} failed"
+                         + (f"  (last failure: {st.get('lastErr')})" if st.get('err') else ""))
+            lines.append(f"page URL: {self.server.url('map.html')}")
+            QMessageBox.information(self, "Tile source test", "\n".join(lines))
+
+        if self._page_ready:
+            self.view.page().runJavaScript("window.vm.tileStats()", show)
+        else:
+            show("")
 
     # ------------------------------------------------------------------ features
     def _refresh_feature_list(self):
@@ -649,4 +708,5 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(5000)
+        self.server.stop()
         super().closeEvent(ev)

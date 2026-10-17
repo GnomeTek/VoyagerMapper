@@ -40,9 +40,18 @@ voymap gui          # or: python -m voymap gui
 
 1. **Layers** panel: check one base map and any overlays. The slider sets
    opacity, in the preview and in the export.
-2. **Tracks & waypoints**: `File → Import GPX…`, or use the draw buttons (the
-   Leaflet toolbar on the map does the same). Click a feature to set its name,
-   color, width and label. "Min zoom" hides a feature on tiles below that zoom.
+2. **Tracks & waypoints**: `File → Import GPX…`, or draw. Click a feature to
+   set its name, color, width and label. "Min zoom" hides a feature on tiles
+   below that zoom.
+
+   Drawing a track ("Draw track" button, or the ✎ button on the map):
+   * left-click adds a point;
+   * right-click pauses — the mouse is free to pan and zoom — and right-click
+     again resumes;
+   * double right-click (or Enter) finishes; Esc cancels.
+
+   Waypoints and areas use the map toolbar (marker and polygon tools); the
+   edit / drag / delete tools on that toolbar work on everything.
 3. **Export**: click "Draw export rectangle" and drag on the map, or "Area =
    tracks extent". Set the zoom range. The label shows the tile count and an
    approximate size (about 30 KB per tile, measured on a CalTopo export).
@@ -52,6 +61,10 @@ voymap gui          # or: python -m voymap gui
 
 `File → Save project` stores features, layers and export settings as
 `*.voymap.json` so you can rebuild later.
+
+If the map area stays blank, click **Test sources** in the Layers panel: it
+downloads one tile for each checked layer through Python and reports the
+HTTP result, which separates a page problem from a network or proxy problem.
 
 ## Use the command line
 
@@ -161,6 +174,6 @@ voymap/
   themes.py     day / night / dim tile recolouring (+ matching CSS preview filter)
   export.py     export job: fetch → composite → overlay → encode → write
   cli.py        command line
-  gui/          PySide6 window, Leaflet page, QWebChannel bridge
+  gui/          PySide6 window, Leaflet page served over loopback HTTP, QWebChannel bridge
 tests/          offline tests (tile math vs. the reference export, MBTiles round-trip)
 ```
