@@ -90,6 +90,23 @@ Two options deliberately deviate from that reference and are **untested on the
 device**: `--encoding jpeg` (smaller files for imagery) and `--spec-extras`
 (adds `minzoom`, `maxzoom`, `center`). Try them on a small export first.
 
+## Day and night themes
+
+The **Theme** control in the Export panel (or `--theme` on the command line)
+recolours the base map tiles before tracks and waypoints are drawn, so your
+features keep their chosen colours in every theme:
+
+* `day` — unchanged.
+* `night` — inverted luminance with hues kept (invert, then rotate hue 180°,
+  then 90 % brightness): white paper becomes near-black, water stays blue,
+  labels become light. The map preview applies the same look.
+* `dim` — colours kept, 70 % brightness.
+
+Tick **export a day + night pair** (or `--both-themes`) to write
+`<name>_day.mbtiles` and `<name>_night.mbtiles` in one go; the night pass reads
+tiles from the local cache, so it costs no extra downloads. On the device the
+two show up as separate custom maps you switch between.
+
 ## Zoom levels
 
 Zoom 13 ≈ 19 m/pixel at 35° N; zoom 14 ≈ 9.6 m/pixel; zoom 15 ≈ 4.8 m/pixel.
@@ -141,6 +158,7 @@ voymap/
   features.py   tracks/waypoints/polygons, GPX + GeoJSON I/O
   overlay.py    rasterizes features onto tiles (2x supersampled)
   mbtiles.py    MBTiles writer matched to the CalTopo reference; inspector
+  themes.py     day / night / dim tile recolouring (+ matching CSS preview filter)
   export.py     export job: fetch → composite → overlay → encode → write
   cli.py        command line
   gui/          PySide6 window, Leaflet page, QWebChannel bridge

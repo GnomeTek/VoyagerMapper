@@ -93,3 +93,27 @@ def test_arcgis_export_url():
     u = src.tile_url(0, 0, 1)
     assert u.startswith("https://example/arcgis/rest/services/X/MapServer/export?bbox=")
     assert "bboxSR=3857" in u and "transparent=true" in u and "size=256,256" in u
+
+
+def test_theme_pair_export(tmp_path):
+    from voymap.themes import apply_theme
+    bbox = BBox(-111.66, 35.19, -111.64, 35.21)
+    base = TileSource(id="fb", name="fb", kind="xyz", url="http://invalid/{z}/{x}/{y}", max_zoom=14)
+    cache_dir = tmp_path / "cache"
+    _seed(cache_dir, base, bbox, 12, 12, (255, 255, 255, 255))          # white "paper"
+    spec = ExportSpec(output=tmp_path / "ride.mbtiles", name="Ride", bbox=bbox, zmin=12, zmax=12,
+                      layers=[LayerSpec("fb")], cache_dir=cache_dir)
+    for s in (spec.variant("day", "_day"), spec.variant("night", "_night")):
+        ExportJob(s, sources={"fb": base}).run()
+    assert (tmp_path / "ride_day.mbtiles").exists() and (tmp_path / "ride_night.mbtiles").exists()
+    from voymap.tilemath import lonlat_to_tile
+    x, y = lonlat_to_tile(-111.65, 35.20, 12)
+    day = Image.open(io.BytesIO(read_tile_xyz(tmp_path / "ride_day.mbtiles", x, y, 12))).convert("RGB")
+    night = Image.open(io.BytesIO(read_tile_xyz(tmp_path / "ride_night.mbtiles", x, y, 12))).convert("RGB")
+    assert day.getpixel((5, 5)) == (255, 255, 255)
+    assert max(night.getpixel((5, 5))) < 30            # white paper -> near black
+    assert inspect(tmp_path / "ride_night.mbtiles")["metadata"]["name"] == "Ride (night)"
+    # hue preservation: pure blue water stays blue-ish after night transform
+    blue = Image.new("RGBA", (4, 4), (40, 120, 220, 255))
+    r, g, b = apply_theme(blue, "night").convert("RGB").getpixel((0, 0))
+    assert b > r and b > g

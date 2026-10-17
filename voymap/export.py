@@ -20,6 +20,7 @@ from .fetch import STATUS_OK, TileFetcher, default_cache_dir
 from .mbtiles import MBTilesWriter, TileEncoder
 from .overlay import OverlayRenderer
 from .sources import TileSource, load_sources
+from .themes import THEMES, apply_theme
 from .tilemath import TILE_SIZE, BBox, tile_bounds
 
 AVG_TILE_BYTES = 30_000  # observed on the CalTopo reference export
@@ -48,6 +49,13 @@ class ExportSpec:
     description: str = "N/A"
     cache_dir: Optional[Path] = None
     skip_empty: bool = True   # don't write tiles where every layer is missing
+    theme: str = "day"        # "day" | "night" | "dim" (see themes.py)
+
+    def variant(self, theme: str, suffix: str) -> "ExportSpec":
+        """Copy of this spec with another theme and an output-name suffix."""
+        from dataclasses import replace
+        out = self.output.with_name(f"{self.output.stem}{suffix}{self.output.suffix}")
+        return replace(self, theme=theme, output=out, name=f"{self.name} ({theme})")
 
     def tile_list(self) -> list[tuple[int, int, int]]:
         tiles = [t for z in range(self.zmin, self.zmax + 1) for t in self.bbox.tiles(z)]
@@ -108,6 +116,8 @@ class ExportJob:
         self.progress = progress or (lambda p: None)
         self.cancel_event = threading.Event()
         self.fetchers: dict[str, TileFetcher] = {}
+        if spec.theme not in THEMES:
+            raise ValueError(f"unknown theme {spec.theme!r}; choose one of {THEMES}")
         for layer in spec.layers:
             src = self.sources.get(layer.source_id)
             if src is None:
@@ -171,6 +181,7 @@ class ExportJob:
                     img = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (235, 235, 235, 255))
                 if img is None:
                     img = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (235, 235, 235, 255))
+                img = apply_theme(img, spec.theme)
                 if ov is not None:
                     img = Image.alpha_composite(img, ov)
                 writer.add_image_xyz(x, y, z, img)

@@ -20,6 +20,7 @@ from ..features import (Feature, features_bbox, features_from_geojson, features_
                         parse_gpx, write_gpx)
 from ..mbtiles import format_inspection, inspect
 from ..sources import load_sources
+from ..themes import THEMES, css_filter
 from ..tilemath import BBox
 from .bridge import Bridge
 
@@ -30,22 +31,34 @@ WEB_DIR = Path(__file__).parent / "web"
 # Export worker
 # ----------------------------------------------------------------------------
 class ExportWorker(QThread):
+    """Runs one or more ExportSpecs in sequence (e.g. a day + night pair)."""
     progress = Signal(object)
-    finished_ok = Signal(object)
+    finished_ok = Signal(object)   # list[(ExportSpec, Progress)]
     failed = Signal(str)
 
-    def __init__(self, spec: ExportSpec, sources):
+    def __init__(self, specs: list[ExportSpec], sources):
         super().__init__()
-        self.job = ExportJob(spec, sources=sources, progress=lambda p: self.progress.emit(p))
+        self.specs = specs
+        self.sources = sources
+        self.job: Optional[ExportJob] = None
+        self._cancelled = False
 
     def run(self):
+        results = []
         try:
-            self.finished_ok.emit(self.job.run())
+            for spec in self.specs:
+                if self._cancelled:
+                    break
+                self.job = ExportJob(spec, sources=self.sources, progress=lambda p: self.progress.emit(p))
+                results.append((spec, self.job.run()))
+            self.finished_ok.emit(results)
         except Exception as e:  # noqa: BLE001
             self.failed.emit(str(e))
 
     def cancel(self):
-        self.job.cancel()
+        self._cancelled = True
+        if self.job:
+            self.job.cancel()
 
 
 # ----------------------------------------------------------------------------
@@ -213,6 +226,13 @@ class MainWindow(QMainWindow):
         self.e_encoding = QComboBox()
         self.e_encoding.addItems(["png8 (palette PNG — matches CalTopo)", "png (truecolor)", "jpeg (smaller; untested on device)"])
         form.addRow("Tile encoding", self.e_encoding)
+        self.e_theme = QComboBox()
+        self.e_theme.addItems(["Day (as shown)", "Night (inverted luminance, hues kept)", "Dim (70 % brightness)"])
+        self.e_theme.setToolTip("Also previews on the map. Tracks and waypoints keep their colours in every theme.")
+        self.e_theme.currentIndexChanged.connect(self._apply_theme_preview)
+        form.addRow("Theme", self.e_theme)
+        self.e_both = QCheckBox("export a day + night pair (<name>_day / <name>_night)")
+        form.addRow("", self.e_both)
         self.e_extras = QCheckBox("write minzoom/maxzoom/center metadata (untested on device)")
         form.addRow("", self.e_extras)
         self.e_refresh = QCheckBox("ignore tile cache (re-download)")
@@ -435,7 +455,7 @@ class MainWindow(QMainWindow):
         return {"version": 1, "features": features_to_geojson(self.features), "export_area": self.export_area,
                 "layers": [{"id": r.src.id, "visible": r.visible, "opacity": r.opacity} for r in self.layer_rows],
                 "export": {"name": self.e_name.text(), "zmin": self.e_zmin.value(), "zmax": self.e_zmax.value(),
-                           "encoding": self.e_encoding.currentIndex()}}
+                           "encoding": self.e_encoding.currentIndex(), "theme": self.e_theme.currentIndex()}}
 
     def _save_project(self):
         if not self.project_path:
@@ -469,6 +489,7 @@ class MainWindow(QMainWindow):
             self.e_zmin.setValue(e.get("zmin", 8))
             self.e_zmax.setValue(e.get("zmax", 14))
             self.e_encoding.setCurrentIndex(e.get("encoding", 0))
+            self.e_theme.setCurrentIndex(e.get("theme", 0))
         self._push_features()
         a = d.get("export_area")
         if a:
@@ -540,16 +561,24 @@ class MainWindow(QMainWindow):
                           polygon=[tuple(p) for p in ring] if ring else None,
                           refresh=self.e_refresh.isChecked(), spec_extras=self.e_extras.isChecked())
 
+    def _theme_name(self) -> str:
+        return THEMES[self.e_theme.currentIndex()]
+
+    def _apply_theme_preview(self, *_):
+        self._js(f"window.vm.setTheme({json.dumps(css_filter(self._theme_name()))})")
+
     def _start_export(self):
         spec = self._build_spec()
         if not spec:
             return
+        spec.theme = self._theme_name()
         est = spec.estimate()
         if est["tiles"] > 20000:
             if QMessageBox.question(self, "Large export",
                                     f"{est['tiles']:,} tiles (~{est['bytes'] / 1e6:.0f} MB). Continue?") != QMessageBox.Yes:
                 return
-        self.worker = ExportWorker(spec, self.sources)
+        specs = [spec.variant("day", "_day"), spec.variant("night", "_night")] if self.e_both.isChecked() else [spec]
+        self.worker = ExportWorker(specs, self.sources)
         self.worker.progress.connect(self._on_progress)
         self.worker.finished_ok.connect(self._on_export_done)
         self.worker.failed.connect(self._on_export_failed)
@@ -571,19 +600,24 @@ class MainWindow(QMainWindow):
                                     + (f"  {p.bytes / 1e6:.1f} MB" if p.bytes else ""))
 
     @Slot(object)
-    def _on_export_done(self, p: Progress):
+    def _on_export_done(self, results):
         self.export_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        spec = self.worker.job.spec
-        if p.phase == "done":
-            info = inspect(spec.output)
-            QMessageBox.information(self, "Export complete",
-                                    f"Wrote {p.written:,} tiles ({info['size_bytes'] / 1e6:.1f} MB) to\n{spec.output}\n\n"
-                                    f"Fetch errors: {p.errors}   tiles with no data: {p.missing}\n\n"
-                                    "Copy the file to the Voyager Pro microSD card, then on the device: "
+        lines = []
+        for spec, p in results:
+            if p.phase == "done":
+                info = inspect(spec.output)
+                lines.append(f"{spec.output.name}: {p.written:,} tiles, {info['size_bytes'] / 1e6:.1f} MB "
+                             f"(fetch errors {p.errors}, empty {p.missing})")
+            else:
+                lines.append(f"{spec.output.name}: {p.phase} — {p.message}")
+        if results and all(p.phase == "done" for _, p in results):
+            QMessageBox.information(self, "Export complete", "\n".join(lines) +
+                                    f"\n\nFolder: {results[0][0].output.parent}\n\n"
+                                    "Copy the file(s) to the Voyager Pro microSD card, then on the device: "
                                     "map screen → CUSTOM MAPS → IMPORT A NEW FILE.")
         else:
-            self.progress_label.setText(f"{p.phase}: {p.message}")
+            self.progress_label.setText("\n".join(lines) or "cancelled")
 
     @Slot(str)
     def _on_export_failed(self, msg: str):

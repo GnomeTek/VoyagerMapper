@@ -198,6 +198,7 @@
     setExportArea(w, s, e, n) { setExportAreaLayer(L.rectangle([[s, w], [n, e]])); },
     clearExportArea() { if (exportArea) { exportArea.remove(); exportArea = null; } send('exportAreaChanged', 'null'); },
     getView() { const c = map.getCenter(); return [c.lat, c.lng, map.getZoom()]; },
+    setTheme(cssFilter) { map.getPane('tilePane').style.filter = cssFilter || 'none'; },
     showTilesGrid(on) { if (on && !window._grid) { window._grid = L.gridLayer({ tileSize: 256 }); window._grid.createTile = function (c) {
         const d = document.createElement('div'); d.style.outline = '1px solid rgba(0,0,0,.25)'; d.style.font = '10px monospace';
         d.innerHTML = `${c.z}/${c.x}/${c.y}`; return d; }; window._grid.addTo(map); }

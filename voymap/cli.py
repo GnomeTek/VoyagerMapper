@@ -74,18 +74,24 @@ def cmd_export(a):
         spec_extras=a.spec_extras, skip_empty=not a.write_empty,
         cache_dir=Path(a.cache_dir) if a.cache_dir else None,
     )
+    spec.theme = a.theme
     est = spec.estimate()
     print(f"area {bbox.as_tuple()}  zooms {zmin}-{zmax}  ~{est['tiles']} tiles  ~{est['bytes'] / 1e6:.0f} MB",
           file=sys.stderr)
     if a.dry_run:
         return
-    job = ExportJob(spec, progress=_progress_printer)
-    try:
-        job.run()
-    except KeyboardInterrupt:
-        job.cancel()
-        sys.exit("\ncancelled")
-    print(format_inspection(inspect(spec.output)))
+    specs = [spec]
+    if a.both_themes:
+        specs = [spec.variant("day", "_day"), spec.variant("night", "_night")]
+    for s in specs:
+        print(f"--- {s.theme}: {s.output}", file=sys.stderr)
+        job = ExportJob(s, progress=_progress_printer)
+        try:
+            job.run()
+        except KeyboardInterrupt:
+            job.cancel()
+            sys.exit("\ncancelled")
+        print(format_inspection(inspect(s.output)))
 
 
 def cmd_inspect(a):
@@ -130,6 +136,10 @@ def main(argv=None):
     e.add_argument("--name", help="map name shown on the device (default: output filename stem)")
     e.add_argument("--encoding", choices=("png8", "png", "jpeg"), default="png8")
     e.add_argument("--jpeg-quality", type=int, default=80)
+    e.add_argument("--theme", choices=("day", "night", "dim"), default="day",
+                   help="tile colour theme; night = inverted luminance with hues kept")
+    e.add_argument("--both-themes", action="store_true",
+                   help="write <output>_day.mbtiles and <output>_night.mbtiles (second pass uses the cache)")
     e.add_argument("--refresh", action="store_true", help="ignore the tile cache and re-download")
     e.add_argument("--spec-extras", action="store_true", help="also write minzoom/maxzoom/center metadata (untested on device)")
     e.add_argument("--write-empty", action="store_true", help="write grey tiles where no layer has data")
