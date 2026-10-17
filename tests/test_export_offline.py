@@ -52,7 +52,7 @@ def test_export_matches_reference_layout(tmp_path):
     out = tmp_path / "out.mbtiles"
     spec = ExportSpec(output=out, name="Test Map", bbox=bbox, zmin=10, zmax=12,
                       layers=[LayerSpec("fake_base"), LayerSpec("fake_over", 0.5)],
-                      features=feats, cache_dir=cache_dir)
+                      features=feats, cache_dir=cache_dir, snap_zoom=None)
     job = ExportJob(spec, sources={"fake_base": base, "fake_over": over})
     p = job.run()
     assert p.phase == "done"
@@ -81,7 +81,7 @@ def test_export_matches_reference_layout(tmp_path):
 def test_preview_only_source_refused(tmp_path):
     src = TileSource(id="osm_like", name="x", kind="xyz", url="http://invalid/{z}/{x}/{y}", bulk_ok=False)
     spec = ExportSpec(output=tmp_path / "x.mbtiles", name="x", bbox=BBox(-1, -1, 1, 1), zmin=1, zmax=1,
-                      layers=[LayerSpec("osm_like")], cache_dir=tmp_path)
+                      layers=[LayerSpec("osm_like")], cache_dir=tmp_path, snap_zoom=None)
     import pytest
     with pytest.raises(ValueError):
         ExportJob(spec, sources={"osm_like": src})
@@ -102,7 +102,7 @@ def test_theme_pair_export(tmp_path):
     cache_dir = tmp_path / "cache"
     _seed(cache_dir, base, bbox, 12, 12, (255, 255, 255, 255))          # white "paper"
     spec = ExportSpec(output=tmp_path / "ride.mbtiles", name="Ride", bbox=bbox, zmin=12, zmax=12,
-                      layers=[LayerSpec("fb")], cache_dir=cache_dir)
+                      layers=[LayerSpec("fb")], cache_dir=cache_dir, snap_zoom=None)
     for s in (spec.variant("day", "_day"), spec.variant("night", "_night")):
         ExportJob(s, sources={"fb": base}).run()
     assert (tmp_path / "ride_day.mbtiles").exists() and (tmp_path / "ride_night.mbtiles").exists()

@@ -75,9 +75,13 @@ def cmd_export(a):
         cache_dir=Path(a.cache_dir) if a.cache_dir else None,
     )
     spec.theme = a.theme
+    spec.snap_zoom = None if a.no_snap else a.snap_zoom
     est = spec.estimate()
-    print(f"area {bbox.as_tuple()}  zooms {zmin}-{zmax}  ~{est['tiles']} tiles  ~{est['bytes'] / 1e6:.0f} MB",
-          file=sys.stderr)
+    eb = spec.effective_bbox()
+    print(f"area {bbox.as_tuple()}", file=sys.stderr)
+    if eb != bbox:
+        print(f"snapped to z{min(max(spec.snap_zoom, zmin), zmax)} tile grid: {eb.as_tuple()}", file=sys.stderr)
+    print(f"zooms {zmin}-{zmax}  ~{est['tiles']} tiles  ~{est['bytes'] / 1e6:.0f} MB", file=sys.stderr)
     if a.dry_run:
         return
     specs = [spec]
@@ -110,9 +114,12 @@ def cmd_sources(a):
 def cmd_estimate(a):
     bbox = BBox(*a.bbox)
     zmin, zmax = _parse_zooms(a.zooms)
+    snapped = bbox.snapped(min(max(a.snap_zoom, zmin), zmax)) if not a.no_snap else bbox
+    if snapped != bbox:
+        print(f"snapped area: {snapped.as_tuple()}")
     for z in range(zmin, zmax + 1):
-        print(f"z{z:<3d} {bbox.tile_count(z):8d} tiles")
-    n = bbox.total_tiles(zmin, zmax)
+        print(f"z{z:<3d} {snapped.tile_count(z):8d} tiles")
+    n = snapped.total_tiles(zmin, zmax)
     print(f"total {n} tiles, ~{n * 30_000 / 1e6:.0f} MB at ~30 KB/tile")
 
 
@@ -140,6 +147,10 @@ def main(argv=None):
                    help="tile colour theme; night = inverted luminance with hues kept")
     e.add_argument("--both-themes", action="store_true",
                    help="write <output>_day.mbtiles and <output>_night.mbtiles (second pass uses the cache)")
+    e.add_argument("--snap-zoom", type=int, default=11,
+                   help="snap the area outward to this zoom's tile grid so all zooms >= it cover the same "
+                        "rectangle (CalTopo snaps only at its max zoom); clamped to the zoom range")
+    e.add_argument("--no-snap", action="store_true", help="no snapping: each zoom takes the tiles touching the bbox")
     e.add_argument("--refresh", action="store_true", help="ignore the tile cache and re-download")
     e.add_argument("--spec-extras", action="store_true", help="also write minzoom/maxzoom/center metadata (untested on device)")
     e.add_argument("--write-empty", action="store_true", help="write grey tiles where no layer has data")
@@ -157,6 +168,8 @@ def main(argv=None):
     es = sub.add_parser("estimate", help="tile count for an area/zoom range")
     es.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("W", "S", "E", "N"))
     es.add_argument("--zooms", required=True)
+    es.add_argument("--snap-zoom", type=int, default=11)
+    es.add_argument("--no-snap", action="store_true")
     es.set_defaults(func=cmd_estimate)
 
     g = sub.add_parser("gui", help="launch the desktop app")

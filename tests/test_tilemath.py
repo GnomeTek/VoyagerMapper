@@ -50,3 +50,31 @@ def test_bbox_validation():
     import pytest
     with pytest.raises(ValueError):
         BBox(10, 0, 5, 1)
+
+
+def test_snapping_makes_extents_identical_across_zooms():
+    b = BBox(-111.70, 35.15, -111.60, 35.25)
+    sb = b.snapped(11)
+    # the union of tiles at every zoom >= 11 is exactly the snapped rectangle
+    for z in range(11, 16):
+        xmin, ymin, xmax, ymax = sb.tile_range(z)
+        w, _, _, n = tile_bounds(xmin, ymin, z)
+        _, s, e, _ = tile_bounds(xmax, ymax, z)
+        assert abs(w - sb.west) < 1e-9 and abs(e - sb.east) < 1e-9
+        assert abs(s - sb.south) < 1e-9 and abs(n - sb.north) < 1e-9
+    # without snapping, extents differ between zooms (this is what the user saw)
+    ext = set()
+    for z in range(11, 14):
+        xmin, ymin, xmax, ymax = b.tile_range(z)
+        ext.add((tile_bounds(xmin, ymin, z)[0], tile_bounds(xmax, ymax, z)[2]))
+    assert len(ext) > 1
+
+
+def test_caltopo_bounds_are_max_zoom_tile_edges():
+    # The reference export's bounds are exactly tile edges at its max zoom (13), not at 11:
+    # CalTopo snaps only at the finest level, so its coarser zooms overshoot by whole tiles.
+    b = BBox(-113.37890625, 31.353636941500987, -111.1376953125, 37.020098201368135)
+    s13 = b.snapped(13)
+    assert all(abs(x - y) < 1e-9 for x, y in zip(s13.as_tuple(), b.as_tuple()))
+    s11 = b.snapped(11)
+    assert any(abs(x - y) > 1e-6 for x, y in zip(s11.as_tuple(), b.as_tuple()))

@@ -124,6 +124,25 @@ Tick **export a day + night pair** (or `--both-themes`) to write
 tiles from the local cache, so it costs no extra downloads. On the device the
 two show up as separate custom maps you switch between.
 
+## Export area and zoom levels: why extents differ per zoom
+
+A tile at zoom *z* is a fixed square on the Web Mercator grid, so an export can
+only include whole tiles. If each zoom level takes "the tiles that touch my
+rectangle", the covered extent is slightly different at every zoom — up to one
+tile wider at each level. CalTopo's exports behave this way too: the reference
+file's bounds are tile edges at its maximum zoom only.
+
+voymap's default is **snap area to tile grid at zoom 11**: the rectangle is
+expanded outward to the zoom-11 tile edges, so every zoom from 11 up covers
+exactly the same area. Coarser zooms (8–10) still overshoot by whole tiles,
+which is harmless — those tiles are few and small. The dotted outline on the
+map shows the snapped extent, and the tile estimate is computed from it.
+
+* Lower snap zoom → bigger area, identical over more zoom levels, more tiles.
+  Snapping at the minimum zoom makes every level identical, but at zoom 8 a
+  tile is ~130 km wide, so that is rarely what you want.
+* Higher snap zoom (or snapping off) → tighter area, extents vary per zoom.
+
 ## Zoom levels
 
 Zoom 13 ≈ 19 m/pixel at 35° N; zoom 14 ≈ 9.6 m/pixel; zoom 15 ≈ 4.8 m/pixel.

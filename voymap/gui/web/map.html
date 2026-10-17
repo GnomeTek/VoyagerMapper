@@ -326,7 +326,13 @@
     },
     startExportRect() { drawingExportArea = true; map.pm.enableDraw('Rectangle'); },
     setExportArea(w, s, e, n) { setExportAreaLayer(L.rectangle([[s, w], [n, e]])); },
-    clearExportArea() { if (exportArea) { exportArea.remove(); exportArea = null; } send('exportAreaChanged', 'null'); },
+    clearExportArea() { if (exportArea) { exportArea.remove(); exportArea = null; } window.vm.showSnapped(null); send('exportAreaChanged', 'null'); },
+    showSnapped(w, s, e, n) {      // the tile-grid-snapped rectangle that will actually be exported
+      if (window._snapped) { window._snapped.remove(); window._snapped = null; }
+      if (w == null) return;
+      window._snapped = L.rectangle([[s, w], [n, e]], { color: '#7a00a0', weight: 1, dashArray: '2 4', fill: false,
+                                                          interactive: false, pmIgnore: true }).addTo(map);
+    },
     getView() { const c = map.getCenter(); return [c.lat, c.lng, map.getZoom()]; },
     setTheme(cssFilter) { map.getPane('tilePane').style.filter = cssFilter || 'none'; },
     showTilesGrid(on) { if (on && !window._grid) { window._grid = L.gridLayer({ tileSize: 256 }); window._grid.createTile = function (c) {

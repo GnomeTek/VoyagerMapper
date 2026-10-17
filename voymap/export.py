@@ -50,6 +50,15 @@ class ExportSpec:
     cache_dir: Optional[Path] = None
     skip_empty: bool = True   # don't write tiles where every layer is missing
     theme: str = "day"        # "day" | "night" | "dim" (see themes.py)
+    # Snap the area outward to the tile grid of this zoom so every zoom >= snap_zoom
+    # covers exactly the same rectangle (CalTopo snaps only at its max zoom). None = no snapping.
+    snap_zoom: Optional[int] = 11
+
+    def effective_bbox(self) -> BBox:
+        if self.snap_zoom is None:
+            return self.bbox
+        z = min(max(self.snap_zoom, self.zmin), self.zmax)
+        return self.bbox.snapped(z)
 
     def variant(self, theme: str, suffix: str) -> "ExportSpec":
         """Copy of this spec with another theme and an output-name suffix."""
@@ -58,7 +67,8 @@ class ExportSpec:
         return replace(self, theme=theme, output=out, name=f"{self.name} ({theme})")
 
     def tile_list(self) -> list[tuple[int, int, int]]:
-        tiles = [t for z in range(self.zmin, self.zmax + 1) for t in self.bbox.tiles(z)]
+        bbox = self.effective_bbox()
+        tiles = [t for z in range(self.zmin, self.zmax + 1) for t in bbox.tiles(z)]
         if self.polygon:
             tiles = [t for t in tiles if _tile_touches_polygon(t, self.polygon)]
         return tiles
@@ -165,7 +175,7 @@ class ExportJob:
         renderer = OverlayRenderer(spec.features)
         encoder = TileEncoder(spec.encoding, spec.jpeg_quality)
         written = 0
-        with MBTilesWriter(spec.output, spec.name, spec.bbox, encoder,
+        with MBTilesWriter(spec.output, spec.name, spec.effective_bbox(), encoder,
                            description=spec.description, spec_extras=spec.spec_extras,
                            attribution="; ".join(sorted({self.fetchers[l.source_id].source.attribution
                                                           for l in spec.layers}))) as writer:

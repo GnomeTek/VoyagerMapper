@@ -264,6 +264,17 @@ class MainWindow(QMainWindow):
         form.addRow("Zoom levels", zrow)
         self.e_zmin.valueChanged.connect(self._update_estimate)
         self.e_zmax.valueChanged.connect(self._update_estimate)
+        self.e_snap = QSpinBox(); self.e_snap.setRange(0, 18); self.e_snap.setValue(11)
+        self.e_snap.setToolTip("The area is expanded outward to the tile grid of this zoom, so every zoom "
+                               "from here up covers exactly the same rectangle (CalTopo snaps only at its max zoom). "
+                               "Coarser zooms still take whole tiles, so they overshoot a little. "
+                               "A lower value gives a bigger, more uniform area; higher = tighter.")
+        self.e_snap.valueChanged.connect(self._update_estimate)
+        self.e_snap_on = QCheckBox("snap area to tile grid at zoom")
+        self.e_snap_on.setChecked(True)
+        self.e_snap_on.toggled.connect(self._update_estimate)
+        srow = QHBoxLayout(); srow.addWidget(self.e_snap_on); srow.addWidget(self.e_snap); srow.addStretch()
+        form.addRow("", srow)
         self.e_encoding = QComboBox()
         self.e_encoding.addItems(["png8 (palette PNG — matches CalTopo)", "png (truecolor)", "jpeg (smaller; untested on device)"])
         form.addRow("Tile encoding", self.e_encoding)
@@ -534,7 +545,8 @@ class MainWindow(QMainWindow):
         return {"version": 1, "features": features_to_geojson(self.features), "export_area": self.export_area,
                 "layers": [{"id": r.src.id, "visible": r.visible, "opacity": r.opacity} for r in self.layer_rows],
                 "export": {"name": self.e_name.text(), "zmin": self.e_zmin.value(), "zmax": self.e_zmax.value(),
-                           "encoding": self.e_encoding.currentIndex(), "theme": self.e_theme.currentIndex()}}
+                           "encoding": self.e_encoding.currentIndex(), "theme": self.e_theme.currentIndex(),
+                           "snap": self.e_snap.value(), "snap_on": self.e_snap_on.isChecked()}}
 
     def _save_project(self):
         if not self.project_path:
@@ -569,6 +581,8 @@ class MainWindow(QMainWindow):
             self.e_zmax.setValue(e.get("zmax", 14))
             self.e_encoding.setCurrentIndex(e.get("encoding", 0))
             self.e_theme.setCurrentIndex(e.get("theme", 0))
+            self.e_snap.setValue(e.get("snap", 11))
+            self.e_snap_on.setChecked(e.get("snap_on", True))
         self._push_features()
         a = d.get("export_area")
         if a:
@@ -595,19 +609,39 @@ class MainWindow(QMainWindow):
         except ValueError:
             return None
 
+    def _snap_zoom(self) -> Optional[int]:
+        return self.e_snap.value() if self.e_snap_on.isChecked() else None
+
+    def _snapped_bbox(self) -> Optional[BBox]:
+        bb = self._current_bbox()
+        if not bb:
+            return None
+        sz = self._snap_zoom()
+        if sz is None:
+            return bb
+        return bb.snapped(min(max(sz, self.e_zmin.value()), self.e_zmax.value()))
+
     def _update_estimate(self):
         bb = self._current_bbox()
         if not bb:
             self.estimate_label.setText("")
+            self._js("window.vm.showSnapped(null)")
             return
         zmin, zmax = self.e_zmin.value(), self.e_zmax.value()
         if zmax < zmin:
             self.estimate_label.setText("zoom max < zoom min")
             return
-        n = bb.total_tiles(zmin, zmax)
+        sb = self._snapped_bbox()
+        if sb != bb:
+            self._js(f"window.vm.showSnapped({sb.west},{sb.south},{sb.east},{sb.north})")
+        else:
+            self._js("window.vm.showSnapped(null)")
+        n = sb.total_tiles(zmin, zmax)
         layers = [r for r in self.layer_rows if r.visible and r.src.bulk_ok]
         self.estimate_label.setText(f"≈ {n:,} tiles, ≈ {n * AVG_TILE_BYTES / 1e6:.0f} MB, "
-                                    f"{len(layers)} layer(s) → up to {n * len(layers):,} tile requests")
+                                    f"{len(layers)} layer(s) → up to {n * len(layers):,} tile requests"
+                                    + (f"\n(dotted outline = area snapped to the z{min(max(self._snap_zoom(), zmin), zmax)} grid)"
+                                       if sb != bb else ""))
 
     def _build_spec(self) -> Optional[ExportSpec]:
         bb = self._current_bbox()
@@ -638,7 +672,8 @@ class MainWindow(QMainWindow):
                           zmin=self.e_zmin.value(), zmax=self.e_zmax.value(), layers=layers,
                           features=[f for f in self.features if f.visible], encoding=enc,
                           polygon=[tuple(p) for p in ring] if ring else None,
-                          refresh=self.e_refresh.isChecked(), spec_extras=self.e_extras.isChecked())
+                          refresh=self.e_refresh.isChecked(), spec_extras=self.e_extras.isChecked(),
+                          snap_zoom=self._snap_zoom())
 
     def _theme_name(self) -> str:
         return THEMES[self.e_theme.currentIndex()]
