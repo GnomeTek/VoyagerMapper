@@ -12,7 +12,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-                               QSlider, QSpinBox, QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..export import AVG_TILE_BYTES, ExportJob, ExportSpec, LayerSpec, Progress
@@ -131,8 +131,21 @@ class MainWindow(QMainWindow):
         self.view.load(QUrl.fromLocalFile(str(WEB_DIR / "map.html")))
 
     # ------------------------------------------------------------------ docks
+    def _make_dock(self, title: str, content: QWidget) -> QDockWidget:
+        """Dock whose content scrolls instead of overlapping when the window is short."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+        scroll.setMinimumWidth(content.sizeHint().width() + 24)
+        dock = QDockWidget(title, self)
+        dock.setWidget(scroll)
+        dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        return dock
+
     def _build_layers_dock(self):
-        dock = QDockWidget("Layers (bottom → top)", self)
         w = QWidget()
         lay = QVBoxLayout(w)
         self.layer_rows: list[LayerRow] = []
@@ -148,16 +161,14 @@ class MainWindow(QMainWindow):
                       "Hover a name for notes. Edit ~/.config/voymap/sources.json to add sources.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #666; font-size: 11px")
+        hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         lay.addWidget(hint)
         self.grid_check = QCheckBox("Show tile grid (z/x/y)")
         self.grid_check.toggled.connect(lambda on: self._js(f"window.vm.showTilesGrid({'true' if on else 'false'})"))
         lay.addWidget(self.grid_check)
-        lay.addStretch()
-        dock.setWidget(w)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self.layers_dock = self._make_dock("Layers (bottom → top)", w)
 
     def _build_features_dock(self):
-        dock = QDockWidget("Tracks & waypoints", self)
         w = QWidget()
         lay = QVBoxLayout(w)
         btns = QHBoxLayout()
@@ -167,6 +178,8 @@ class MainWindow(QMainWindow):
             btns.addWidget(b)
         lay.addLayout(btns)
         self.feature_list = QListWidget()
+        self.feature_list.setMinimumHeight(90)
+        self.feature_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.feature_list.currentItemChanged.connect(self._on_feature_list_select)
         lay.addWidget(self.feature_list, 1)
 
@@ -206,11 +219,9 @@ class MainWindow(QMainWindow):
         form.addRow(row)
         self.style_box.setEnabled(False)
         lay.addWidget(self.style_box)
-        dock.setWidget(w)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self.features_dock = self._make_dock("Tracks & waypoints", w)
 
     def _build_export_dock(self):
-        dock = QDockWidget("Export to Voyager Pro", self)
         w = QWidget()
         lay = QVBoxLayout(w)
         form = QFormLayout()
@@ -273,8 +284,12 @@ class MainWindow(QMainWindow):
         gpx_btn.clicked.connect(self._export_gpx)
         lay.addWidget(gpx_btn)
         lay.addStretch()
-        dock.setWidget(w)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self.export_dock = self._make_dock("Export to Voyager Pro", w)
+        # initial vertical split of the right column; the features list absorbs resizes
+        layers_h = self.layers_dock.widget().widget().sizeHint().height() + 30
+        export_h = w.sizeHint().height() + 30
+        self.resizeDocks([self.layers_dock, self.features_dock, self.export_dock],
+                         [layers_h, 260, export_h], Qt.Vertical)
 
     def _build_menu(self):
         m = self.menuBar().addMenu("&File")
