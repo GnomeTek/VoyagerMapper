@@ -44,11 +44,15 @@ voymap gui          # or: python -m voymap gui
    set its name, color, width and label. "Min zoom" hides a feature on tiles
    below that zoom.
 
-   Drawing a track ("Draw track" button, or the ✎ button on the map):
+   Drawing a track ("Draw track" button, or the ✎ button on the map). A small
+   toolbar at the top of the map shows the state and point count while you draw:
    * left-click adds a point;
-   * right-click pauses — the mouse is free to pan and zoom — and right-click
-     again resumes;
-   * double right-click (or Enter) finishes; Esc cancels.
+   * right-click, Space, or the Pause button pauses — the mouse is free to pan
+     and zoom — and any of the same resumes;
+   * double right-click, Enter, or the Finish button finishes; Esc or Cancel
+     cancels.
+   * To add points to a track you already finished, select it and click
+     "Extend track": drawing continues from its last point.
 
    Waypoints and areas use the map toolbar (marker and polygon tools); the
    edit / drag / delete tools on that toolbar work on everything.
@@ -132,10 +136,10 @@ stops at zoom 13.
 |----------------------|---------|-------|
 | `usgs_topo`          | base    | Public domain. Cache advertised to level 17; default max 16. |
 | `usgs_imagery`, `usgs_imagery_topo`, `usgs_shaded_relief` | base | Public domain. |
-| `usfs_mvum`, `usfs_mvum_labeled` | overlay | Dynamic ArcGIS service: one render request per tile, so it is slow. Rate-limited to 4 req/s. |
+| `usfs_mvum`, `usfs_mvum_labeled` | overlay | Dynamic ArcGIS service: one render request per tile, so it is slow. Rate-limited to 4 req/s. Only the MVUM roads/trails layers are requested; the service's status layers (the "No Travel Data" notices) and duplicate visitor-map symbology are excluded. Renders from zoom 11 up (the service is scale-limited to 1:300k). |
 | `usfs_roads`, `usfs_trails` | overlay | Same service type as MVUM. |
 | `opentopomap`        | base    | Community server, CC-BY-SA. Rate-limited to 2 req/s. Keep areas modest. |
-| `osm`                | base    | **Preview only.** The OSM Foundation tile policy forbids bulk download; the exporter refuses it. |
+| `osm`                | —       | Defined in the registry but **not offered**: the OSM Foundation tile policy forbids bulk download. |
 
 FSTopo is not available as a tile service on the USFS EDW server (checked
 2026-10-17). FSTopo quads are published as GeoPDFs, which the Voyager Pro can

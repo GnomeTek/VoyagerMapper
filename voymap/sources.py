@@ -141,10 +141,14 @@ BUILTIN: list[TileSource] = [
         kind="arcgis_export",
         url="https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MVUM_01/MapServer",
         attribution="USDA Forest Service",
-        min_zoom=8, max_zoom=16, opaque=False, bulk_ok=True,
+        min_zoom=11, max_zoom=16, opaque=False, bulk_ok=True,
         rate_limit=4.0, max_workers=3,
+        export_params={"layers": "show:1,2"},
         notes="Dynamic (uncached) service: one render request per tile. Transparent overlay; "
-              "stack it on a base layer.",
+              "stack it on a base layer. Only the MVUM roads/trails layers (ids 1,2) are requested: "
+              "the service's 'Status' layers would otherwise print 'No Travel Data' notices at "
+              "zooms <= 10, and its 'Visitor Map Symbology' group draws the same roads a second "
+              "time. The MVUM group is scale-limited to 1:300k, i.e. nothing renders below zoom 11.",
     ),
     TileSource(
         id="usfs_mvum_labeled",
@@ -152,9 +156,10 @@ BUILTIN: list[TileSource] = [
         kind="arcgis_export",
         url="https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MVUM_02/MapServer",
         attribution="USDA Forest Service",
-        min_zoom=8, max_zoom=16, opaque=False, bulk_ok=True,
+        min_zoom=11, max_zoom=16, opaque=False, bulk_ok=True,
         rate_limit=4.0, max_workers=3,
-        notes="Same as usfs_mvum but with road/trail labels.",
+        export_params={"layers": "show:1,2"},
+        notes="Same as usfs_mvum but with road/trail labels (layers 1,2 only; see usfs_mvum).",
     ),
     TileSource(
         id="usfs_trails",

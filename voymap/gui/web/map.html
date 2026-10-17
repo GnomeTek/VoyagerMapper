@@ -12,11 +12,20 @@
   #err { position:absolute; left:8px; top:8px; z-index:1000; background:#ffe; color:#900;
          font: 12px system-ui; padding:4px 8px; border-radius:4px; display:none; max-width:60%; }
   .export-area { stroke: #d400ff; stroke-dasharray: 6 6; fill: #d400ff; fill-opacity: .05; }
+  #trackbar { position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:1000; display:none;
+              background:rgba(255,255,255,.95); border:1px solid #999; border-radius:6px; padding:6px 10px;
+              font:13px system-ui, sans-serif; box-shadow:0 1px 4px rgba(0,0,0,.3); white-space:nowrap; }
+  #trackbar button { margin-left:6px; padding:3px 10px; font:13px system-ui; }
+  #trackbar .paused { color:#b00; font-weight:bold; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="status">loading…</div>
+<div id="trackbar"><span id="trackinfo"></span>
+  <button id="tbPause" title="right-click or Space">Pause</button>
+  <button id="tbFinish" title="double right-click or Enter">Finish</button>
+  <button id="tbCancel" title="Esc">Cancel</button></div>
 <div id="err"></div>
 <script src="qwebchannel.js"></script>
 <script src="vendor/leaflet.js"></script>
@@ -151,24 +160,45 @@
   // ---- custom track drawing ---------------------------------------------------------------
   // left click: add point | right click: pause / resume (mouse is free) | double right click: finish
   // Enter: finish | Esc: cancel
-  const track = { active: false, paused: false, pts: [], line: null, rubber: null, lastRight: 0, hint: null };
+  const track = { active: false, paused: false, pts: [], line: null, rubber: null, lastRight: 0, props: null };
+  const trackbar = document.getElementById('trackbar');
+  function updateTrackbar() {
+    document.getElementById('trackinfo').innerHTML = (track.paused ? '<span class="paused">PAUSED</span> ' : 'Drawing ') +
+      track.pts.length + ' pt' + (track.pts.length === 1 ? '' : 's');
+    document.getElementById('tbPause').textContent = track.paused ? 'Resume' : 'Pause';
+  }
+  document.getElementById('tbPause').onclick = e => { e.stopPropagation(); togglePause(); };
+  document.getElementById('tbFinish').onclick = e => { e.stopPropagation(); finishTrack(); };
+  document.getElementById('tbCancel').onclick = e => { e.stopPropagation(); cancelTrack(); };
+  L.DomEvent.disableClickPropagation(trackbar);
   const container = map.getContainer();
   container.addEventListener('contextmenu', e => { if (track.active) e.preventDefault(); });
 
   function trackStatus(msg) { document.getElementById('status').textContent = msg; }
-  function startTrack() {
+  function startTrack(presetPts, props) {
     if (track.active) return;
     map.pm.disableDraw();
-    track.active = true; track.paused = false; track.pts = [];
-    track.line = L.polyline([], { color: '#ff0000', weight: 3 }).addTo(map);
-    track.rubber = L.polyline([], { color: '#ff0000', weight: 2, dashArray: '4 6', opacity: .7 }).addTo(map);
+    track.active = true; track.paused = false; track.pts = (presetPts || []).slice(); track.props = props || null;
+    const color = (props && props.style && props.style.color) || '#ff0000';
+    track.line = L.polyline(track.pts, { color, weight: 3 }).addTo(map);
+    track.rubber = L.polyline([], { color, weight: 2, dashArray: '4 6', opacity: .7 }).addTo(map);
     container.style.cursor = 'crosshair';
     map.doubleClickZoom.disable();
-    trackStatus('Drawing track: left-click adds points · right-click pauses/resumes · double right-click or Enter finishes · Esc cancels');
+    trackStatus('Drawing track: left-click adds points · right-click / Space pauses · double right-click / Enter finishes · Esc cancels');
     map.on('click', trackClick); map.on('mousemove', trackMove); map.on('contextmenu', trackRight);
     document.addEventListener('keydown', trackKey);
+    trackbar.style.display = 'block'; updateTrackbar();
   }
-  function trackClick(e) { if (!track.active || track.paused) return; track.pts.push(e.latlng); track.line.setLatLngs(track.pts); }
+  function togglePause() {
+    if (!track.active) return;
+    track.paused = !track.paused;
+    container.style.cursor = track.paused ? '' : 'crosshair';
+    track.rubber.setLatLngs([]);
+    trackStatus(track.paused ? 'Track paused (' + track.pts.length + ' pts): right-click, Space or Resume to continue'
+                             : 'Drawing track: left-click adds points · right-click pauses · double right-click finishes');
+    updateTrackbar();
+  }
+  function trackClick(e) { if (!track.active || track.paused) return; track.pts.push(e.latlng); track.line.setLatLngs(track.pts); updateTrackbar(); }
   function trackMove(e) {
     if (!track.active || track.paused || !track.pts.length) { if (track.rubber) track.rubber.setLatLngs([]); return; }
     track.rubber.setLatLngs([track.pts[track.pts.length - 1], e.latlng]);
@@ -178,27 +208,36 @@
     const now = Date.now();
     if (now - track.lastRight < 450) { track.lastRight = 0; finishTrack(); return; }   // double right click
     track.lastRight = now;
-    track.paused = !track.paused;
-    container.style.cursor = track.paused ? '' : 'crosshair';
-    track.rubber.setLatLngs([]);
-    trackStatus(track.paused ? 'Track paused (' + track.pts.length + ' pts): right-click to resume, double right-click or Enter to finish'
-                             : 'Drawing track: left-click adds points · right-click pauses · double right-click finishes');
+    togglePause();
   }
-  function trackKey(e) { if (e.key === 'Enter') finishTrack(); else if (e.key === 'Escape') cancelTrack(); }
+  function trackKey(e) {
+    if (e.key === 'Enter') finishTrack();
+    else if (e.key === 'Escape') cancelTrack();
+    else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); togglePause(); }
+  }
   function endTrackMode() {
     map.off('click', trackClick); map.off('mousemove', trackMove); map.off('contextmenu', trackRight);
     document.removeEventListener('keydown', trackKey);
     container.style.cursor = ''; map.doubleClickZoom.enable();
     if (track.rubber) track.rubber.remove(); if (track.line) track.line.remove();
-    track.active = false; track.line = track.rubber = null;
+    track.active = false; track.line = track.rubber = null; track.paused = false;
+    trackbar.style.display = 'none';
     trackStatus('ready');
   }
-  function cancelTrack() { endTrackMode(); track.pts = []; }
+  function cancelTrack() {
+    const props = track.props, pts = track.pts.slice(); endTrackMode(); track.pts = []; track.props = null;
+    if (props) {   // cancelling an "extend" restores the original track untouched
+      const layer = L.polyline(pts.slice(0, props._origLen)); delete props._origLen;
+      decorate(layer, props); features.addLayer(layer);
+      layer.on('pm:edit pm:dragend pm:markerdragend', emitFeatures); emitFeatures();
+    }
+  }
   function finishTrack() {
-    const pts = track.pts.slice(); endTrackMode();
-    if (pts.length < 2) return;
+    const pts = track.pts.slice(), props = track.props; endTrackMode(); track.props = null;
+    if (pts.length < 2) { if (props) cancelTrack(); return; }
     const layer = L.polyline(pts);
-    decorate(layer, { name: 'Track ' + (features.getLayers().length + 1) });
+    if (props) { delete props._origLen; decorate(layer, props); }
+    else decorate(layer, { name: 'Track ' + (features.getLayers().length + 1) });
     features.addLayer(layer);
     layer.on('pm:edit pm:dragend pm:markerdragend', emitFeatures);
     emitFeatures();
@@ -273,6 +312,18 @@
     setView(lat, lon, z) { map.setView([lat, lon], z); },
     startDraw(kind) { if (kind === 'Line') startTrack(); else map.pm.enableDraw(kind); },   // 'Line' | 'Marker' | 'Polygon'
     tileStats() { return JSON.stringify(tileStats); },
+    extendTrack(id) {        // continue adding points to an existing track (from its last point)
+      let target = null;
+      features.eachLayer(l => { if (l.feature.properties.id === id && l instanceof L.Polyline && !(l instanceof L.Polygon)) target = l; });
+      if (!target) return false;
+      let pts = target.getLatLngs();
+      if (pts.length && Array.isArray(pts[0])) pts = pts[pts.length - 1];   // multi-line: extend the last segment
+      const props = Object.assign({}, target.feature.properties, { _origLen: pts.length });
+      features.removeLayer(target);
+      startTrack(pts, props);
+      map.panTo(pts[pts.length - 1]);
+      return true;
+    },
     startExportRect() { drawingExportArea = true; map.pm.enableDraw('Rectangle'); },
     setExportArea(w, s, e, n) { setExportAreaLayer(L.rectangle([[s, w], [n, e]])); },
     clearExportArea() { if (exportArea) { exportArea.remove(); exportArea = null; } send('exportAreaChanged', 'null'); },

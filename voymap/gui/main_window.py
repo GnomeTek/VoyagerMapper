@@ -170,7 +170,8 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(w)
         self.layer_rows: list[LayerRow] = []
         # base layers first, overlays after; USGS topo on by default
-        ordered = sorted(self.sources.values(), key=lambda s: (not s.opaque, s.id))
+        # preview-only sources (usage policy forbids bulk download) are not offered at all
+        ordered = sorted((s for s in self.sources.values() if s.bulk_ok), key=lambda s: (not s.opaque, s.id))
         for src in ordered:
             row = LayerRow(src)
             row.check.setChecked(src.id == "usgs_topo")
@@ -235,6 +236,10 @@ class MainWindow(QMainWindow):
         form.addRow("", self.f_visible)
         form.addRow("Min zoom", self.f_minzoom)
         row = QHBoxLayout()
+        b = QPushButton("Extend track")
+        b.setToolTip("Continue adding points from the end of the selected track")
+        b.clicked.connect(lambda: self._js(f"window.vm.extendTrack({json.dumps(self._selected_id())})"))
+        row.addWidget(b)
         b = QPushButton("Zoom to")
         b.clicked.connect(lambda: self._js(f"window.vm.zoomToFeature({json.dumps(self._selected_id())})"))
         row.addWidget(b)
@@ -338,7 +343,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_page_ready(self):
         self._page_ready = True
-        specs = [s.leaflet_spec() for s in self.sources.values()]
+        specs = [s.leaflet_spec() for s in self.sources.values() if s.bulk_ok]
         self._js(f"window.vm.setSources({json.dumps(specs)})")
         self._push_layers()
         v = self.settings.value("view")
