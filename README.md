@@ -1,4 +1,4 @@
-# VoyagerMapper (voymap)
+# VoyagerMapper
 
 Lightweight Python map building application for the Trail Tech Voyager navigation units: build offline MBTiles maps and GPX files for the Voyager Pro from public tile sources.
 
