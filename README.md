@@ -1,4 +1,6 @@
-# voymap (VoyagerMapper) — offline map builder for the Trail Tech Voyager Pro
+# VoyagerMapper (voymap)
+
+Lightweight Python map building application for the Trail Tech Voyager navigation units: build offline MBTiles maps and GPX files for the Voyager Pro from public tile sources.
 
 [![tests](https://github.com/GnomeTek/VoyagerMapper/actions/workflows/ci.yml/badge.svg)](https://github.com/GnomeTek/VoyagerMapper/actions/workflows/ci.yml)
 
