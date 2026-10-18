@@ -4,3 +4,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 *.mbtiles
+build/
+dist/
+*.spec.bak

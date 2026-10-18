@@ -1,4 +1,6 @@
-# voymap — offline map builder for the Trail Tech Voyager Pro
+# voymap (VoyagerMapper) — offline map builder for the Trail Tech Voyager Pro
+
+[![tests](https://github.com/GnomeTek/VoyagerMapper/actions/workflows/ci.yml/badge.svg)](https://github.com/GnomeTek/VoyagerMapper/actions/workflows/ci.yml)
 
 voymap builds MBTiles map files (and GPX files) for the Trail Tech Voyager Pro
 from public tile sources. It replaces the CalTopo export step: no Pro
@@ -18,7 +20,14 @@ What it does:
 
 ## Install
 
-Python 3.10 or newer.
+**Windows installer** — download `voymap-setup-<version>.exe` from the
+[Releases page](https://github.com/GnomeTek/VoyagerMapper/releases) and run it.
+No Python needed. A portable zip is there too. The installer is not
+code-signed, so Windows SmartScreen will show a "Windows protected your PC"
+warning the first time: click *More info → Run anyway*. The `SHA256SUMS.txt`
+alongside the download lets you verify the file.
+
+**From source** — Python 3.10 or newer.
 
 ```bash
 cd voymap
@@ -202,6 +211,25 @@ there to force a fresh download, or pass `--refresh`.
   are a cheap way to start.
 * The GUI was exercised offscreen (bridge, feature round-trip, export area,
   estimates), not with a visible window.
+
+## Building the installer
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`): pushing
+a tag `vX.Y.Z` that matches `voymap.__version__` runs the tests, freezes the
+app with PyInstaller (`packaging/voymap.spec`), wraps it with Inno Setup
+(`packaging/voymap.iss`), and attaches the installer, a portable zip and
+checksums to a GitHub Release. To build locally on Windows, install
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) and run `build_installer.bat`.
+
+To cut a release: bump `__version__` in `voymap/__init__.py`, commit, then
+`git tag v0.2.0 && git push --tags`.
+
+## License
+
+GPL-3.0-or-later. Bundled third-party code: Leaflet (BSD-2-Clause) and
+Leaflet-Geoman free (MIT) under `voymap/gui/web/vendor/`; Qt/PySide6 (LGPL-3.0)
+in the installer. Map data and tiles belong to their providers; see the
+attribution each source carries.
 
 ## Layout
 

@@ -4,19 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voymap"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Build offline MBTiles maps (and GPX) for the Trail Tech Voyager Pro from public tile sources"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "GPL-3.0-or-later" }
 dependencies = [
   "Pillow>=10",
   "requests>=2.31",
 ]
 
+[project.urls]
+Homepage = "https://github.com/GnomeTek/VoyagerMapper"
+Issues = "https://github.com/GnomeTek/VoyagerMapper/issues"
+
 [project.optional-dependencies]
 gui = ["PySide6>=6.6"]
 dev = ["pytest"]
+build = ["pyinstaller>=6.10"]
+
+[tool.setuptools.dynamic]
+version = { attr = "voymap.__version__" }
 
 [project.scripts]
 voymap = "voymap.cli:main"
