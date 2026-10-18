@@ -70,9 +70,15 @@ data, the extra metadata keys, forcing a re-download, the padding used by
 "Area = tracks extent", the MBTiles description, and the tile cache (location,
 open, clear). Every option the command line has is in the app.
 
-**Source details…** (Layers panel, or `File → Tile sources…`) lists every
-source's URL, zoom range, rate limit and notes, and creates/opens the custom
-sources file for adding your own.
+**Add source…** (Layers panel) adds your own tile server: an XYZ URL template
+(`{z}/{x}/{y}`, optional `{s}` subdomains) or a dynamic ArcGIS MapServer. Set
+the zoom range, base-map vs overlay, and a rate limit, then **Test** fetches
+one tile at the current view before you save. Your sources are marked ★ in the
+list, and clicking a ★ name then **Edit…** / **Remove** changes or drops it;
+the list updates live. They're stored in `~/.config/voymap/sources.json`
+(`%USERPROFILE%\.config\voymap\sources.json` on Windows), which **Source
+details…** also lists along with every built-in source's URL and notes.
+Check a server's usage terms before bulk-downloading from it.
 
 `File → Save project` stores features, layers and all export settings as
 `*.voymap.json` so you can rebuild later.
@@ -175,8 +181,10 @@ FSTopo is not available as a tile service on the USFS EDW server (checked
 2026-10-17). FSTopo quads are published as GeoPDFs, which the Voyager Pro can
 import directly.
 
-To add or change a source, create `~/.config/voymap/sources.json` with a list of
-objects in the shape printed by `voymap sources` (see `voymap/sources.py`).
+To add a source use **Add source…** in the app, or edit
+`~/.config/voymap/sources.json` by hand (a list of objects with the fields
+printed by `voymap sources`; an entry whose `id` matches a built-in one
+overrides it, which is how to raise a built-in's `max_zoom`, for example).
 
 The tile cache lives in `~/.cache/voymap/tiles/<source>.sqlite`. Delete a file
 there to force a fresh download, or pass `--refresh`.

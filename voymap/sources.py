@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
@@ -45,6 +46,33 @@ class TileSource:
     notes: str = ""
     # arcgis_export only:
     export_params: dict = field(default_factory=dict)
+    user: bool = False             # defined in the user's sources.json (editable/removable in the app)
+
+    def validate(self) -> list[str]:
+        """Human-readable problems; empty list means usable."""
+        errs = []
+        if not re.fullmatch(r"[a-z0-9_\-]{1,40}", self.id or ""):
+            errs.append("id must be 1-40 chars of a-z, 0-9, _ or -")
+        if not self.name.strip():
+            errs.append("name is required")
+        if self.kind not in ("xyz", "arcgis_export"):
+            errs.append("kind must be xyz or arcgis_export")
+        u = (self.url or "").strip()
+        if not u.lower().startswith(("http://", "https://")):
+            errs.append("url must start with http:// or https://")
+        if self.kind == "xyz":
+            for tok in ("{z}", "{x}", "{y}"):
+                if tok not in u:
+                    errs.append(f"xyz url must contain {tok}")
+            if "{s}" in u and not self.subdomains:
+                errs.append("url uses {s} but no subdomains are given")
+        if not (0 <= self.min_zoom <= self.max_zoom <= 22):
+            errs.append("zoom range must satisfy 0 <= min <= max <= 22")
+        if not (0.1 <= self.rate_limit <= 50):
+            errs.append("rate limit must be 0.1-50 requests/s")
+        if not (1 <= self.max_workers <= 16):
+            errs.append("workers must be 1-16")
+        return errs
 
     def tile_url(self, x: int, y: int, z: int) -> str:
         if self.kind == "xyz":
@@ -215,25 +243,62 @@ def user_sources_path() -> Path:
     return Path(base) / "voymap" / "sources.json"
 
 
+_FIELDS = set(TileSource.__dataclass_fields__)
+
+
+def load_user_sources(path: Optional[Path] = None) -> list[TileSource]:
+    """Sources from the user's JSON file (unknown keys ignored, bad entries skipped)."""
+    p = path or user_sources_path()
+    out: list[TileSource] = []
+    if not p.exists():
+        return out
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"warning: could not read {p}: {e}")
+        return out
+    for d in data if isinstance(data, list) else []:
+        try:
+            d = {k: v for k, v in d.items() if k in _FIELDS}
+            d["user"] = True
+            src = TileSource(**d)
+            if src.validate():
+                print(f"warning: skipping source {src.id!r}: {'; '.join(src.validate())}")
+                continue
+            out.append(src)
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: skipping bad source entry: {e}")
+    return out
+
+
+def save_user_sources(sources: list[TileSource], path: Optional[Path] = None) -> Path:
+    p = path or user_sources_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = []
+    for s in sources:
+        d = s.to_dict()
+        d.pop("user", None)
+        data.append(d)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(p)
+    return p
+
+
 def load_sources(include_user: bool = True) -> dict[str, TileSource]:
     sources = {s.id: s for s in BUILTIN}
     if include_user:
-        p = user_sources_path()
-        if p.exists():
-            try:
-                data = json.loads(p.read_text())
-                for d in data:
-                    src = TileSource(**d)
-                    sources[src.id] = src
-            except Exception as e:  # noqa: BLE001
-                print(f"warning: could not read {p}: {e}")
+        for src in load_user_sources():
+            sources[src.id] = src       # a user entry with a built-in id overrides it
     return sources
 
 
 def write_user_sources_template(path: Optional[Path] = None) -> Path:
-    """Write a template users can edit to add/override sources."""
+    """Write an example file users can edit by hand (the app's Add source dialog is the easier route)."""
     path = path or user_sources_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    example = [s.to_dict() for s in BUILTIN if s.id == "usfs_fstopo"]
-    path.write_text(json.dumps(example, indent=2))
-    return path
+    if path.exists():
+        return path
+    example = TileSource(id="example_xyz", name="Example XYZ source", kind="xyz",
+                         url="https://tiles.example.com/{z}/{x}/{y}.png", attribution="Example",
+                         min_zoom=0, max_zoom=16, opaque=True, notes="Edit or delete this entry.")
+    return save_user_sources([example], path)

@@ -27,7 +27,8 @@ from ..tilemath import BBox
 from .bridge import Bridge
 from .server import LocalServer
 from ..fetch import TileFetcher, default_cache_dir
-from ..sources import user_sources_path, write_user_sources_template
+from ..sources import load_user_sources, save_user_sources, user_sources_path, write_user_sources_template
+from .source_dialog import SourceDialog
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -89,7 +90,8 @@ class LayerRow(QWidget):
         self.src = src
         lay = QHBoxLayout(self)
         lay.setContentsMargins(2, 0, 2, 0)
-        self.check = QCheckBox(src.name if (src.bulk_ok or "preview" in src.name) else src.name + "  [preview only]")
+        label = src.name if (src.bulk_ok or "preview" in src.name) else src.name + "  [preview only]"
+        self.check = QCheckBox(("★ " if src.user else "") + label)
         self.check.setToolTip(src.notes or src.url)
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 100)
@@ -171,17 +173,19 @@ class MainWindow(QMainWindow):
         w = QWidget()
         lay = QVBoxLayout(w)
         self.layer_rows: list[LayerRow] = []
-        # base layers first, overlays after; USGS topo on by default
-        # preview-only sources (usage policy forbids bulk download) are not offered at all
-        ordered = sorted((s for s in self.sources.values() if s.bulk_ok), key=lambda s: (not s.opaque, s.id))
-        for src in ordered:
-            row = LayerRow(src)
-            row.check.setChecked(src.id == "usgs_topo")
-            row.changed.connect(self._push_layers)
-            self.layer_rows.append(row)
-            lay.addWidget(row)
-        hint = QLabel("Opaque sources are base maps; check one base plus any overlays. "
-                      "Hover a name for notes. Edit ~/.config/voymap/sources.json to add sources.")
+        self.rows_box = QWidget()
+        self.rows_lay = QVBoxLayout(self.rows_box)
+        self.rows_lay.setContentsMargins(0, 0, 0, 0)
+        self.rows_lay.setSpacing(2)
+        lay.addWidget(self.rows_box)
+        self._rebuild_layer_rows()
+        mrow = QHBoxLayout()
+        b = QPushButton("Add source…"); b.clicked.connect(self._add_source); mrow.addWidget(b)
+        b = QPushButton("Edit…"); b.setToolTip("Edit the selected user-added source"); b.clicked.connect(self._edit_source); mrow.addWidget(b)
+        b = QPushButton("Remove"); b.setToolTip("Remove the selected user-added source"); b.clicked.connect(self._remove_source); mrow.addWidget(b)
+        lay.addLayout(mrow)
+        hint = QLabel("Opaque sources are base maps; check one base plus any overlays. Hover a name for notes. "
+                      "Select a row by clicking its name; your own sources are marked ★ and can be edited or removed.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #666; font-size: 11px")
         hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
@@ -453,6 +457,84 @@ class MainWindow(QMainWindow):
     def _on_view_changed(self, lat, lon, z):
         self.settings.setValue("view", json.dumps([lat, lon, z]))
 
+    # ------------------------------------------------------------------ layer rows / user sources
+    def _rebuild_layer_rows(self, keep_state: Optional[dict] = None):
+        state = keep_state or {r.src.id: (r.visible, r.slider.value()) for r in self.layer_rows}
+        for r in self.layer_rows:
+            self.rows_lay.removeWidget(r)
+            r.deleteLater()
+        self.layer_rows = []
+        # base layers first, overlays after; preview-only sources are not offered at all
+        ordered = sorted((s for s in self.sources.values() if s.bulk_ok), key=lambda s: (not s.opaque, s.user, s.id))
+        for src in ordered:
+            row = LayerRow(src)
+            vis, op = state.get(src.id, (src.id == "usgs_topo" and not state, 100))
+            row.check.setChecked(bool(vis))
+            row.slider.setValue(op)
+            row.changed.connect(self._push_layers)
+            row.check.clicked.connect(lambda _=False, r=row: self._select_row(r))
+            self.layer_rows.append(row)
+            self.rows_lay.addWidget(row)
+        self._selected_row: Optional[LayerRow] = None
+
+    def _select_row(self, row):
+        self._selected_row = row
+        for r in self.layer_rows:
+            r.setStyleSheet("background: #dbe9ff; border-radius: 3px" if r is row else "")
+
+    def _reload_sources(self):
+        """Re-read sources and push to the map without restarting."""
+        self.sources = load_sources()
+        self._rebuild_layer_rows()
+        if self._page_ready:
+            specs = [s.leaflet_spec() for s in self.sources.values() if s.bulk_ok]
+            self._js(f"window.vm.setSources({json.dumps(specs)})")
+        self._push_layers()
+
+    def _current_view(self) -> tuple[float, float, int]:
+        v = self.settings.value("view")
+        lat, lon, z = (json.loads(v) if v else (35.2, -111.65, 11))
+        return float(lat), float(lon), int(z)
+
+    def _add_source(self):
+        dlg = SourceDialog(self, set(self.sources), self._current_view())
+        if dlg.exec() != QDialog.Accepted or not dlg.result_source:
+            return
+        user = load_user_sources()
+        user.append(dlg.result_source)
+        save_user_sources(user)
+        self._reload_sources()
+        for r in self.layer_rows:
+            if r.src.id == dlg.result_source.id:
+                r.check.setChecked(True)
+                self._select_row(r)
+        self.statusBar().showMessage(f"added source {dlg.result_source.id} → {user_sources_path()}", 6000)
+
+    def _edit_source(self):
+        row = getattr(self, "_selected_row", None)
+        if not row or not row.src.user:
+            QMessageBox.information(self, "Edit source", "Click the name of one of your own sources (marked ★) first. "
+                                                          "Built-in sources can't be edited here.")
+            return
+        dlg = SourceDialog(self, set(self.sources) - {row.src.id}, self._current_view(), source=row.src)
+        if dlg.exec() != QDialog.Accepted or not dlg.result_source:
+            return
+        user = [u for u in load_user_sources() if u.id != row.src.id] + [dlg.result_source]
+        save_user_sources(user)
+        self._reload_sources()
+
+    def _remove_source(self):
+        row = getattr(self, "_selected_row", None)
+        if not row or not row.src.user:
+            QMessageBox.information(self, "Remove source", "Click the name of one of your own sources (marked ★) first. "
+                                                            "Built-in sources can't be removed.")
+            return
+        if QMessageBox.question(self, "Remove source", f"Remove '{row.src.name}' ({row.src.id})?\n"
+                                                        "Its cached tiles stay in the cache folder until you clear it.") != QMessageBox.Yes:
+            return
+        save_user_sources([u for u in load_user_sources() if u.id != row.src.id])
+        self._reload_sources()
+
     # ------------------------------------------------------------------ cache & sources
     def _refresh_cache_label(self):
         d = default_cache_dir()
@@ -502,12 +584,16 @@ class MainWindow(QMainWindow):
             lines.append("")
         p = user_sources_path()
         lines.append(f"Custom / overriding sources file: {p}  ({'exists' if p.exists() else 'not created yet'})")
-        lines.append("Each entry there has the same fields as above (id, name, kind, url, min_zoom, max_zoom, opaque, ...). "
-                     "An entry whose id matches a built-in one replaces it. Restart the app after editing.")
+        lines.append("Use 'Add source…' in the Layers panel to add one with a live test. The file can also be edited by "
+                     "hand (same fields as above); an entry whose id matches a built-in one replaces it. "
+                     "Restart the app after editing the file by hand.")
         txt.setPlainText("\n".join(lines))
         v.addWidget(txt)
         row = QHBoxLayout()
-        b = QPushButton("Create / open custom sources file")
+        b = QPushButton("Add source…")
+        b.clicked.connect(lambda: (dlg.accept(), self._add_source()))
+        row.addWidget(b)
+        b = QPushButton("Open sources file")
         b.clicked.connect(lambda: self._open_user_sources())
         row.addWidget(b)
         row.addStretch()
