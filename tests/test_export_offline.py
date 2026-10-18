@@ -135,3 +135,21 @@ def test_trim_coarse_makes_outside_transparent(tmp_path):
     x, y = lonlat_to_tile(-111.65, 35.20, 12)        # at/above the snap zoom: untouched
     im = Image.open(io.BytesIO(read_tile_xyz(tmp_path / "t.mbtiles", x, y, 12))).convert("RGBA")
     assert im.getchannel("A").getextrema() == (255, 255)
+
+
+def test_overall_progress_is_monotonic_and_exact(tmp_path):
+    bbox = BBox(-111.66, 35.19, -111.64, 35.21)
+    a = TileSource(id="pa", name="a", kind="xyz", url="http://invalid/{z}/{x}/{y}", max_zoom=14)
+    b = TileSource(id="pb", name="b", kind="xyz", url="http://invalid/{z}/{x}/{y}", max_zoom=14, opaque=False)
+    cache_dir = tmp_path / "cache"
+    spec = ExportSpec(output=tmp_path / "p.mbtiles", name="P", bbox=bbox, zmin=10, zmax=12,
+                      layers=[LayerSpec("pa"), LayerSpec("pb")], cache_dir=cache_dir, snap_zoom=None)
+    _seed(cache_dir, a, bbox, 10, 12, (200, 200, 200, 255)); _seed(cache_dir, b, bbox, 10, 12, (0, 0, 255, 100))
+    seen = []
+    p = ExportJob(spec, sources={"pa": a, "pb": b}, progress=seen.append).run()
+    n = len(spec.tile_list())
+    assert p.overall_total == 3 * n                      # 2 fetch layers + 1 render per tile
+    assert p.overall_done == p.overall_total
+    dones = [q.overall_done for q in seen]
+    assert dones == sorted(dones)                        # never goes backwards
+    assert {q.step for q in seen} == {"step 1 of 3", "step 2 of 3", "step 3 of 3"}

@@ -372,7 +372,14 @@ class MainWindow(QMainWindow):
         self.cancel_btn.clicked.connect(self._cancel_export)
         brow = QHBoxLayout(); brow.addWidget(self.export_btn); brow.addWidget(self.cancel_btn)
         lay.addLayout(brow)
+        self.overall_label = QLabel("")
+        self.overall_label.setStyleSheet("font-weight: bold")
+        lay.addWidget(self.overall_label)
+        self.overall_progress = QProgressBar()
+        self.overall_progress.setFormat("%p%  overall")
+        lay.addWidget(self.overall_progress)
         self.progress = QProgressBar()
+        self.progress.setFormat("%p%  this step")
         lay.addWidget(self.progress)
         self.progress_label = QLabel("")
         self.progress_label.setWordWrap(True)
@@ -845,6 +852,9 @@ class MainWindow(QMainWindow):
         self.export_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.progress.setValue(0)
+        self.overall_progress.setValue(0)
+        self.overall_label.setText("Overall: starting…")
+        self._file_index = 0
         self.worker.start()
 
     def _cancel_export(self):
@@ -854,10 +864,29 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _on_progress(self, p: Progress):
+        import time
         self.progress.setMaximum(max(1, p.total))
         self.progress.setValue(p.done)
-        self.progress_label.setText(f"[{p.phase}] {p.message}  errors={p.errors} missing={p.missing}"
+        self.progress_label.setText(f"[{p.step}: {p.phase}] {p.message}  errors={p.errors} missing={p.missing}"
                                     + (f"  {p.bytes / 1e6:.1f} MB" if p.bytes else ""))
+        # overall across every file in this run (a day+night pair is two jobs of equal size)
+        nfiles = max(1, len(self.worker.specs)) if self.worker else 1
+        fi = self._file_index
+        done = fi * p.overall_total + p.overall_done
+        total = nfiles * max(1, p.overall_total)
+        self.overall_progress.setMaximum(total)
+        self.overall_progress.setValue(min(done, total))
+        eta = ""
+        if p.started_at and p.overall_done > 0 and p.overall_done < p.overall_total:
+            rate = p.overall_done / max(1e-6, time.time() - p.started_at)
+            remaining = (total - done) / rate
+            eta = f"   ~{int(remaining // 60)} min {int(remaining % 60)} s left"
+        label = f"Overall: {done:,} / {total:,} units"
+        if nfiles > 1:
+            label += f"   (file {fi + 1} of {nfiles})"
+        self.overall_label.setText(label + eta)
+        if p.phase in ("done", "cancelled") and fi + 1 < nfiles:
+            self._file_index += 1
 
     @Slot(object)
     def _on_export_done(self, results):

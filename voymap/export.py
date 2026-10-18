@@ -100,6 +100,11 @@ class Progress:
     missing: int = 0
     written: int = 0
     bytes: int = 0
+    # whole-export progress: fetch units (one per layer per tile) + render units (one per tile)
+    overall_done: int = 0
+    overall_total: int = 0
+    step: str = ""             # e.g. "step 2 of 3" (layers + render)
+    started_at: float = 0.0    # time.time() when the job started (for ETA)
 
 
 ProgressCb = Callable[[Progress], None]
@@ -155,33 +160,48 @@ class ExportJob:
             f.cancel()
 
     def run(self) -> Progress:
+        import time
         spec = self.spec
         tiles = spec.tile_list()
         total = len(tiles)
         if total == 0:
             raise ValueError("no tiles in the selected area/zoom range")
         errors = missing = 0
+        started = time.time()
+
+        # Work plan, so the overall bar is exact: one unit per (layer, tile) fetch, one per tile render.
+        plan = []
+        for layer in spec.layers:
+            src = self.fetchers[layer.source_id].source
+            plan.append((src, [t for t in tiles if src.min_zoom <= t[2] <= src.max_zoom]))
+        overall_total = sum(len(w) for _, w in plan) + total
+        overall_base = 0
+        n_steps = len(plan) + 1
+
+        def report(phase, done, n, msg, step_i, **kw):
+            self.progress(Progress(phase, done, n, msg, errors=errors, missing=missing,
+                                   overall_done=overall_base + done, overall_total=overall_total,
+                                   step=f"step {step_i} of {n_steps}", started_at=started, **kw))
 
         # Phase 1: fetch every layer into the cache (per-source pools + rate limits).
-        for layer in spec.layers:
-            fetcher = self.fetchers[layer.source_id]
-            src = fetcher.source
-            wanted = [t for t in tiles if src.min_zoom <= t[2] <= src.max_zoom]
+        for li, (src, wanted) in enumerate(plan, 1):
+            fetcher = self.fetchers[src.id]
             done = 0
 
-            def cb(res, _src=src, _n=len(wanted)):
+            def cb(res, _src=src, _n=len(wanted), _li=li):
                 nonlocal done, errors
                 done += 1
                 if res.status == "error":
                     errors += 1
                 if done % 25 == 0 or done == _n:
-                    self.progress(Progress(f"fetch:{_src.id}", done, _n, f"{_src.name}: {done}/{_n}",
-                                           errors=errors))
+                    report(f"fetch:{_src.id}", done, _n, f"{_src.name}: {done}/{_n}", _li)
 
-            self.progress(Progress(f"fetch:{src.id}", 0, len(wanted), f"{src.name}: starting"))
+            report(f"fetch:{src.id}", 0, len(wanted), f"{src.name}: starting", li)
             fetcher.fetch_many(wanted, on_result=cb)
+            overall_base += len(wanted)
             if self.cancel_event.is_set():
-                return Progress("cancelled", done, total, "cancelled", errors=errors)
+                return Progress("cancelled", done, total, "cancelled", errors=errors,
+                                overall_done=overall_base, overall_total=overall_total, started_at=started)
 
         # Phase 2: composite + overlay + encode + write.
         renderer = OverlayRenderer(spec.features)
@@ -211,13 +231,12 @@ class ExportJob:
                 writer.add_image_xyz(x, y, z, img)
                 written += 1
                 if i % 20 == 0 or i == total:
-                    self.progress(Progress("render", i, total, f"rendering {i}/{total}",
-                                           errors=errors, missing=missing, written=written,
-                                           bytes=writer.bytes))
+                    report("render", i, total, f"rendering {i}/{total}", n_steps, written=written, bytes=writer.bytes)
             final_bytes = writer.bytes
         p = Progress("cancelled" if self.cancel_event.is_set() else "done", total, total,
                      f"wrote {written} tiles to {spec.output}", errors=errors, missing=missing,
-                     written=written, bytes=final_bytes)
+                     written=written, bytes=final_bytes, overall_done=overall_total, overall_total=overall_total,
+                     step=f"step {n_steps} of {n_steps}", started_at=started)
         self.progress(p)
         return p
 
