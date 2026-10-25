@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import math
 import os
 import sqlite3
 import threading
@@ -27,6 +28,9 @@ from .sources import TileSource, USER_AGENT
 STATUS_OK = "ok"
 STATUS_MISSING = "missing"
 STATUS_ERROR = "error"
+
+MAX_TILE_BYTES = 8 * 1024 * 1024  # no real tile is this big; bounds memory and cache size
+MAX_RETRY_AFTER = 60.0  # seconds; caps a server-supplied Retry-After
 
 
 def default_cache_dir() -> Path:
@@ -53,6 +57,34 @@ class TokenBucket:
                     return
                 wait = (1 - self.tokens) / self.rate
             time.sleep(wait)
+
+
+class _Session(requests.Session):
+    """Session that drops the source's custom headers on a cross-origin redirect.
+
+    requests itself strips only ``Authorization`` when a redirect changes host,
+    so an API-key header would otherwise be sent to the redirect target.
+    """
+
+    def __init__(self, private_headers: Iterable[str] = ()):
+        super().__init__()
+        self.private_headers = list(private_headers)
+
+    def rebuild_auth(self, prepared_request, response):
+        super().rebuild_auth(prepared_request, response)
+        if self.should_strip_auth(response.request.url, prepared_request.url):
+            for k in self.private_headers:
+                prepared_request.headers.pop(k, None)
+
+
+def _read_capped(r: requests.Response, cap: int) -> bytes:
+    """Read at most ``cap + 1`` bytes of a streamed body, so oversize is detectable."""
+    buf = bytearray()
+    for chunk in r.iter_content(64 * 1024):
+        buf += chunk
+        if len(buf) > cap:
+            break
+    return bytes(buf)
 
 
 class TileCache:
@@ -125,7 +157,7 @@ class TileFetcher:
     def _session(self) -> requests.Session:
         s = getattr(self._local, "session", None)
         if s is None:
-            s = requests.Session()
+            s = _Session(self.source.headers)
             s.headers.update({"User-Agent": USER_AGENT, "Accept": "image/*,*/*;q=0.8"})
             s.headers.update(self.source.headers)
             self._local.session = s
@@ -147,28 +179,35 @@ class TileFetcher:
                 return TileResult(x, y, z, STATUS_ERROR, None, error="cancelled")
             self.bucket.acquire()
             try:
-                r = self._session().get(url, timeout=self.timeout)
+                with self._session().get(url, timeout=self.timeout, stream=True) as r:
+                    body = _read_capped(r, MAX_TILE_BYTES)
             except requests.RequestException as e:
                 last_err = str(e)
-                time.sleep(min(8, 0.5 * 2 ** attempt))
+                if self.stop_event.wait(min(8, 0.5 * 2 ** attempt)):
+                    return TileResult(x, y, z, STATUS_ERROR, None, error="cancelled")
                 continue
             if r.status_code == 404:
                 self.cache.put(z, x, y, STATUS_MISSING, None)
                 return TileResult(x, y, z, STATUS_MISSING, None)
             if r.status_code in (429, 500, 502, 503, 504):
                 last_err = f"HTTP {r.status_code}"
-                retry_after = r.headers.get("Retry-After")
+                backoff = min(16, 1.0 * 2 ** attempt)
                 try:
-                    delay = float(retry_after) if retry_after else min(16, 1.0 * 2 ** attempt)
-                except ValueError:
-                    delay = min(16, 1.0 * 2 ** attempt)
-                time.sleep(delay)
+                    delay = float(r.headers.get("Retry-After") or backoff)
+                except ValueError:  # e.g. the HTTP-date form
+                    delay = backoff
+                if not math.isfinite(delay):
+                    delay = backoff
+                if self.stop_event.wait(min(max(delay, 0.0), MAX_RETRY_AFTER)):
+                    return TileResult(x, y, z, STATUS_ERROR, None, error="cancelled")
                 continue
             if r.status_code != 200:
                 last_err = f"HTTP {r.status_code}"
                 break
+            if len(body) > MAX_TILE_BYTES:
+                last_err = f"response larger than {MAX_TILE_BYTES} bytes"
+                break
             ctype = r.headers.get("Content-Type", "")
-            body = r.content
             if "image" not in ctype or len(body) < 24:
                 # ArcGIS returns JSON error bodies with HTTP 200; treat as error,
                 # but an empty/blank image is a legitimate "nothing here".
