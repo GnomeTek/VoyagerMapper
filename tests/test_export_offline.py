@@ -153,3 +153,26 @@ def test_overall_progress_is_monotonic_and_exact(tmp_path):
     dones = [q.overall_done for q in seen]
     assert dones == sorted(dones)                        # never goes backwards
     assert {q.step for q in seen} == {"step 1 of 3", "step 2 of 3", "step 3 of 3"}
+
+
+def test_export_is_atomic(tmp_path):
+    bbox = BBox(-111.66, 35.19, -111.64, 35.21)
+    src = TileSource(id="at", name="at", kind="xyz", url="http://invalid/{z}/{x}/{y}", max_zoom=14)
+    cache_dir = tmp_path / "cache"
+    _seed(cache_dir, src, bbox, 12, 12, (255, 255, 255, 255))
+    out = tmp_path / "a.mbtiles"
+    out.write_bytes(b"previous good export")
+    spec = ExportSpec(output=out, name="A", bbox=bbox, zmin=12, zmax=12,
+                      layers=[LayerSpec("at")], cache_dir=cache_dir, snap_zoom=None)
+
+    # cancelled mid-render: previous file intact, no .part left
+    job = ExportJob(spec, sources={"at": src})
+    job.progress = lambda p: job.cancel() if p.phase == "render" else None
+    assert job.run().phase == "cancelled"
+    assert out.read_bytes() == b"previous good export"
+    assert not out.with_name(out.name + ".part").exists()
+
+    # success replaces it
+    assert ExportJob(spec, sources={"at": src}).run().phase == "done"
+    assert inspect(out)["tile_count"] == bbox.total_tiles(12, 12)
+    assert not out.with_name(out.name + ".part").exists()

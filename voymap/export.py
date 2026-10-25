@@ -233,6 +233,8 @@ class ExportJob:
                 if i % 20 == 0 or i == total:
                     report("render", i, total, f"rendering {i}/{total}", n_steps, written=written, bytes=writer.bytes)
             final_bytes = writer.bytes
+            if self.cancel_event.is_set():
+                writer.abort()
         p = Progress("cancelled" if self.cancel_event.is_set() else "done", total, total,
                      f"wrote {written} tiles to {spec.output}", errors=errors, missing=missing,
                      written=written, bytes=final_bytes, overall_done=overall_total, overall_total=overall_total,

@@ -14,6 +14,7 @@ Trail Tech Voyager Pro (inspected 2026-10-17):
 from __future__ import annotations
 
 import io
+import os
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -57,15 +58,19 @@ class MBTilesWriter:
                  encoder: Optional[TileEncoder] = None, description: str = "N/A",
                  attribution: str = "", spec_extras: bool = False, overwrite: bool = True):
         self.path = Path(path)
-        if overwrite and self.path.exists():
-            self.path.unlink()
+        if not overwrite and self.path.exists():
+            raise FileExistsError(self.path)
+        # Write to a sibling and rename on success, so a cancelled/failed export
+        # never truncates or replaces an existing good file.
+        self.tmp_path = self.path.with_name(self.path.name + ".part")
+        self.tmp_path.unlink(missing_ok=True)
         self.name = name
         self.bounds = bounds
         self.encoder = encoder or TileEncoder()
         self.description = description
         self.attribution = attribution
         self.spec_extras = spec_extras
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.tmp_path)
         self.conn.execute("PRAGMA journal_mode=OFF")
         self.conn.execute("PRAGMA synchronous=OFF")
         self.conn.execute("CREATE TABLE metadata (name text, value text)")
@@ -99,7 +104,17 @@ class MBTilesWriter:
             self._batch.clear()
             self.conn.commit()
 
+    def abort(self) -> None:
+        """Discard the partial file; the target path is left untouched."""
+        if self.conn is None:
+            return
+        self.conn.close()
+        self.conn = None
+        self.tmp_path.unlink(missing_ok=True)
+
     def close(self) -> None:
+        if self.conn is None:
+            return
         self._flush()
         w, s, e, n = self.bounds.as_tuple()
         meta = [
@@ -126,12 +141,17 @@ class MBTilesWriter:
         self.conn.execute("CREATE INDEX 'idx_y' on 'tiles' ('tile_row')")
         self.conn.commit()
         self.conn.close()
+        self.conn = None
+        os.replace(self.tmp_path, self.path)
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.close()
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self.close()
+        else:
+            self.abort()
 
 
 # ----------------------------------------------------------------------------
