@@ -67,6 +67,8 @@
   let suppress = false;
 
   function send(name, ...args) { if (bridge && bridge[name]) bridge[name](...args); }
+  // Leaflet renders tooltip and attribution strings as HTML; names and attributions come from user files.
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 
   function featureStyle(props) {
     const s = (props && props.style) || {};
@@ -89,7 +91,7 @@
     if (!p.style) p.style = {};
     if (layer instanceof L.CircleMarker) layer.setStyle(markerStyle(p));
     else if (layer.setStyle) layer.setStyle(featureStyle(p));
-    if (p.name && layer.bindTooltip) layer.bindTooltip(p.name, { permanent: layer instanceof L.CircleMarker, direction: 'right', offset: [8, 0] });
+    if (p.name && layer.bindTooltip) layer.bindTooltip(esc(p.name), { permanent: layer instanceof L.CircleMarker, direction: 'right', offset: [8, 0] });
     layer.on('click', () => { selectedId = p.id; send('featureSelected', p.id); });
   }
 
@@ -262,7 +264,7 @@
       for (const s of list) {
         sources[s.id] = s;
         if (tileLayers[s.id]) continue;
-        const opts = { maxZoom: 19, maxNativeZoom: s.maxZoom, minZoom: 0, attribution: s.attribution, opaque: s.opaque,
+        const opts = { maxZoom: 19, maxNativeZoom: s.maxZoom, minZoom: 0, attribution: esc(s.attribution || ''), opaque: s.opaque,
                        subdomains: s.subdomains || 'abc', crossOrigin: false };
         tileLayers[s.id] = s.kind === 'arcgis_export' ? new ArcGISExport(s.url, s.exportParams, opts)
                                                        : L.tileLayer(s.url, opts);
@@ -300,7 +302,7 @@
         Object.assign(l.feature.properties, props);
         const p = l.feature.properties;
         if (l instanceof L.CircleMarker) l.setStyle(markerStyle(p)); else l.setStyle(featureStyle(p));
-        if (l.getTooltip()) l.setTooltipContent(p.name || ''); else if (p.name) l.bindTooltip(p.name);
+        if (l.getTooltip()) l.setTooltipContent(esc(p.name || '')); else if (p.name) l.bindTooltip(esc(p.name));
         if (p.visible === false) l.setStyle({ opacity: 0.25, fillOpacity: 0.05 });
       });
       emitFeatures();

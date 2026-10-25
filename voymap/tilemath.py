@@ -88,6 +88,13 @@ class BBox:
         if not (-90 <= self.south < self.north <= 90):
             raise ValueError(f"bad latitudes: {self.south}, {self.north}")
 
+    @classmethod
+    def from_dict(cls, d) -> "BBox":
+        """BBox from a {west, south, east, north} mapping such as a project file's export_area.
+
+        Raises KeyError, TypeError or ValueError on missing, non-numeric or out-of-range values."""
+        return cls(*(float(d[k]) for k in ("west", "south", "east", "north")))
+
     def tile_range(self, z: int) -> tuple[int, int, int, int]:
         """(xmin, ymin, xmax, ymax) inclusive XYZ tile range covering the bbox."""
         # Work in pixel space with a small inward epsilon so that a bbox edge
