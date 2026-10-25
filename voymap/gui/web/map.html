@@ -160,7 +160,7 @@
   // ---- custom track drawing ---------------------------------------------------------------
   // left click: add point | right click: pause / resume (mouse is free) | double right click: finish
   // Enter: finish | Esc: cancel
-  const track = { active: false, paused: false, pts: [], line: null, rubber: null, lastRight: 0, props: null };
+  const track = { active: false, paused: false, pts: [], line: null, rubber: null, lastRight: 0, props: null, rest: [] };
   const trackbar = document.getElementById('trackbar');
   function updateTrackbar() {
     document.getElementById('trackinfo').innerHTML = (track.paused ? '<span class="paused">PAUSED</span> ' : 'Drawing ') +
@@ -175,10 +175,10 @@
   container.addEventListener('contextmenu', e => { if (track.active) e.preventDefault(); });
 
   function trackStatus(msg) { document.getElementById('status').textContent = msg; }
-  function startTrack(presetPts, props) {
+  function startTrack(presetPts, props, rest) {
     if (track.active) return;
     map.pm.disableDraw();
-    track.active = true; track.paused = false; track.pts = (presetPts || []).slice(); track.props = props || null;
+    track.active = true; track.paused = false; track.pts = (presetPts || []).slice(); track.props = props || null; track.rest = rest || [];
     const color = (props && props.style && props.style.color) || '#ff0000';
     track.line = L.polyline(track.pts, { color, weight: 3 }).addTo(map);
     track.rubber = L.polyline([], { color, weight: 2, dashArray: '4 6', opacity: .7 }).addTo(map);
@@ -225,17 +225,18 @@
     trackStatus('ready');
   }
   function cancelTrack() {
-    const props = track.props, pts = track.pts.slice(); endTrackMode(); track.pts = []; track.props = null;
+    const props = track.props, pts = track.pts.slice(), rest = track.rest; endTrackMode(); track.pts = []; track.props = null; track.rest = [];
     if (props) {   // cancelling an "extend" restores the original track untouched
-      const layer = L.polyline(pts.slice(0, props._origLen)); delete props._origLen;
+      const orig = pts.slice(0, props._origLen), layer = L.polyline(rest.length ? [...rest, orig] : orig); delete props._origLen;
       decorate(layer, props); features.addLayer(layer);
       layer.on('pm:edit pm:dragend pm:markerdragend', emitFeatures); emitFeatures();
     }
   }
   function finishTrack() {
-    const pts = track.pts.slice(), props = track.props; endTrackMode(); track.props = null;
-    if (pts.length < 2) { if (props) cancelTrack(); return; }
-    const layer = L.polyline(pts);
+    const pts = track.pts.slice(), props = track.props, rest = track.rest; endTrackMode(); track.props = null;
+    if (pts.length < 2) { if (props) { track.props = props; track.rest = rest; cancelTrack(); } return; }
+    track.rest = [];
+    const layer = L.polyline(rest.length ? [...rest, pts] : pts);
     if (props) { delete props._origLen; decorate(layer, props); }
     else decorate(layer, { name: 'Track ' + (features.getLayers().length + 1) });
     features.addLayer(layer);
@@ -316,11 +317,11 @@
       let target = null;
       features.eachLayer(l => { if (l.feature.properties.id === id && l instanceof L.Polyline && !(l instanceof L.Polygon)) target = l; });
       if (!target) return false;
-      let pts = target.getLatLngs();
-      if (pts.length && Array.isArray(pts[0])) pts = pts[pts.length - 1];   // multi-line: extend the last segment
+      let pts = target.getLatLngs(), rest = [];
+      if (pts.length && Array.isArray(pts[0])) { rest = pts.slice(0, -1); pts = pts[pts.length - 1]; }   // multi-line: extend the last segment, keep the others
       const props = Object.assign({}, target.feature.properties, { _origLen: pts.length });
       features.removeLayer(target);
-      startTrack(pts, props);
+      startTrack(pts, props, rest);
       map.panTo(pts[pts.length - 1]);
       return true;
     },
