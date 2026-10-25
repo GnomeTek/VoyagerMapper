@@ -32,7 +32,8 @@ alongside the download lets you verify the file.
 **From source** — Python 3.10 or newer.
 
 ```bash
-cd voymap
+git clone https://github.com/GnomeTek/VoyagerMapper.git
+cd VoyagerMapper
 python -m venv .venv
 . .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[gui,dev]"   # Pillow, requests, PySide6, pytest
