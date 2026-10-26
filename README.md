@@ -20,6 +20,8 @@ What it does:
   load on the device (see "Output format" below).
 * Writes a GPX of your tracks and waypoints for the device's GPX import.
 
+**New here?** Read the [quick start](docs/QUICKSTART.md) (also as a [PDF](docs/quickstart.pdf)): four steps with annotated screenshots.
+
 ## Install
 
 **Windows installer** — download `voymap-setup-<version>.exe` from the

@@ -348,7 +348,7 @@ class MainWindow(QMainWindow):
         self._refresh_cache_label()
 
         arow = QHBoxLayout()
-        b = QPushButton("Draw export rectangle")
+        self.draw_area_btn = b = QPushButton("Draw export rectangle")
         b.clicked.connect(lambda: self._js("window.vm.startExportRect()"))
         arow.addWidget(b)
         b = QPushButton("Area = tracks extent")
