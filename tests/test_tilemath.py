@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from voymap.tilemath import (BBox, lonlat_to_pixel, lonlat_to_tile, pixel_to_lonlat,
                              tile_bounds, tile_bounds_3857, xyz_to_tms, tms_to_xyz)
 
@@ -47,7 +49,6 @@ def test_tile_bounds_consistency():
 
 
 def test_bbox_validation():
-    import pytest
     with pytest.raises(ValueError):
         BBox(10, 0, 5, 1)
 
@@ -78,3 +79,20 @@ def test_caltopo_bounds_are_max_zoom_tile_edges():
     assert all(abs(x - y) < 1e-9 for x, y in zip(s13.as_tuple(), b.as_tuple()))
     s11 = b.snapped(11)
     assert any(abs(x - y) > 1e-6 for x, y in zip(s11.as_tuple(), b.as_tuple()))
+
+
+def test_bbox_from_dict_coerces_numbers_and_rejects_bad_input():
+    b = BBox.from_dict({"west": -112, "south": "35.1", "east": -111.5, "north": 35.4, "ring": None})
+    assert (b.west, b.south, b.east, b.north) == (-112.0, 35.1, -111.5, 35.4)
+    bad = [
+        {"west": "0);alert(1);(0", "south": 35, "east": -111, "north": 36},  # script in a project file
+        {"west": -112, "south": 35, "east": -111},  # missing north
+        {"west": None, "south": 35, "east": -111, "north": 36},
+        {"west": [1], "south": 35, "east": -111, "north": 36},
+        {"west": "nan", "south": 35, "east": -111, "north": 36},
+        {"west": -111, "south": 35, "east": -112, "north": 36},  # west > east
+        "not a mapping",
+    ]
+    for d in bad:
+        with pytest.raises((KeyError, TypeError, ValueError)):
+            BBox.from_dict(d)

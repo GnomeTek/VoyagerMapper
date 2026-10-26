@@ -8,7 +8,7 @@ from typing import Optional
 from PySide6.QtCore import QSettings, Qt, QThread, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QKeySequence
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
                                QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
@@ -156,9 +156,6 @@ class MainWindow(QMainWindow):
                                                                      "application/javascript")})
         self.view = QWebEngineView()
         self.view.setPage(MapPage(self.server.port, self.view))
-        st = self.view.settings()
-        st.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-        st.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
         self.bridge = Bridge()
         self.channel = QWebChannel()
         self.channel.registerObject("bridge", self.bridge)
@@ -843,7 +840,13 @@ class MainWindow(QMainWindow):
         self._push_features()
         a = d.get("export_area")
         if a:
-            self._js(f"window.vm.setExportArea({a['west']},{a['south']},{a['east']},{a['north']})")
+            try:
+                ab = BBox.from_dict(a)
+            except (KeyError, TypeError, ValueError):
+                QMessageBox.warning(self, "Open project", "The project's export area is not four valid coordinates "
+                                    "(west < east, south < north) and was ignored.")
+            else:
+                self._js(f"window.vm.setExportArea({ab.west},{ab.south},{ab.east},{ab.north})")
         bb = features_bbox(self.features)
         if bb:
             self._js(f"window.vm.zoomTo({bb.west},{bb.south},{bb.east},{bb.north})")
