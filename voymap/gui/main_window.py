@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSettings, Qt, QThread, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QColor, QKeySequence
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QKeySequence
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEngineSettings
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
                                QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
@@ -43,6 +43,29 @@ def _read_qrc(path: str) -> bytes:
         return bytes(f.readAll().data())
     finally:
         f.close()
+
+
+class MapPage(QWebEnginePage):
+    """Keeps the map view on the loopback page: the web channel stays with our own origin.
+
+    Web link clicks elsewhere (e.g. the Leaflet attribution) open in the system browser; any
+    other navigation away, and every popup window, is refused. Qt reports script-set
+    ``location`` as a link click too, so only http(s) is ever handed to the OS.
+    """
+
+    def __init__(self, port: int, parent=None):
+        super().__init__(parent)
+        self.port = port
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        if url.scheme() == "http" and url.host() == "127.0.0.1" and url.port() == self.port:
+            return True
+        if nav_type == QWebEnginePage.NavigationTypeLinkClicked and url.scheme() in ("http", "https"):
+            QDesktopServices.openUrl(url)
+        return False
+
+    def createWindow(self, _type):
+        return None
 
 
 # ----------------------------------------------------------------------------
@@ -129,12 +152,13 @@ class MainWindow(QMainWindow):
         self._page_ready = False
 
         # -- map view
+        self.server = LocalServer(WEB_DIR, extra={"/qwebchannel.js": (_read_qrc(":/qtwebchannel/qwebchannel.js"),
+                                                                     "application/javascript")})
         self.view = QWebEngineView()
+        self.view.setPage(MapPage(self.server.port, self.view))
         st = self.view.settings()
         st.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
         st.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
-        self.server = LocalServer(WEB_DIR, extra={"/qwebchannel.js": (_read_qrc(":/qtwebchannel/qwebchannel.js"),
-                                                                     "application/javascript")})
         self.bridge = Bridge()
         self.channel = QWebChannel()
         self.channel.registerObject("bridge", self.bridge)
