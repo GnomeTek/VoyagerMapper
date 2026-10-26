@@ -1,10 +1,70 @@
 # VoyagerMapper quick start
 
-This guide shows the four steps to make a map file for the Trail Tech Voyager
-Pro. The default settings make a file that loads on the device. You do not
-have to change them.
+This guide shows how to install VoyagerMapper on Windows and the four steps
+to make a map file for the Trail Tech Voyager Pro. The default settings make
+a file that loads on the device. You do not have to change them.
 
-Start the app with `run_gui.bat`. Pan and zoom the map to your riding area.
+## 0. Install and start the app
+
+You do this once. You need an internet connection. If you prefer an
+installer, download `voymap-setup-<version>.exe` from the
+[Releases page](https://github.com/GnomeTek/VoyagerMapper/releases) and skip
+to step 0.4.
+
+### 0.1 Install Python
+
+1. Open <https://www.python.org/downloads/> and download Python for Windows
+   (3.10 or newer).
+2. Start the installer.
+3. On the first screen, check **Add python.exe to PATH**.
+4. Click **Install Now** and wait for the installer to finish.
+
+If Python is already installed, skip this step.
+
+### 0.2 Download the source
+
+1. Open <https://github.com/GnomeTek/VoyagerMapper>.
+2. Click the green **Code** button.
+3. Click **Download ZIP**.
+4. Open the downloaded file `VoyagerMapper-main.zip` and extract it to a
+   folder you keep, for example `C:\Users\<you>\Documents\VoyagerMapper`.
+
+The folder must contain `setup.bat`, `run_gui.bat`, and `pyproject.toml`.
+
+If you use git, you can instead run
+`git clone https://github.com/GnomeTek/VoyagerMapper.git`.
+
+### 0.3 Run setup
+
+1. Open the folder from step 0.2.
+2. Double-click **`setup.bat`**.
+
+A command window opens. The script makes a Python environment in a `.venv`
+subfolder, installs the app and its libraries (about 200 MB, most of it the
+Qt map view), and runs the self-test. This takes a few minutes. The last
+lines you see are:
+
+```
+26 passed in ...s
+
+Setup complete. Double-click run_gui.bat to start voymap.
+Press any key to continue . . .
+```
+
+Press a key to close the window. If the window shows `Setup failed`, read
+the lines above it. The usual cause is that Python is not on the PATH:
+repeat step 0.1 and make sure the **Add python.exe to PATH** box is checked.
+
+### 0.4 Start the app
+
+1. Double-click **`run_gui.bat`** in the same folder.
+2. Wait for the window with the map to open.
+
+If you used the installer, start **voymap** from the Start menu instead.
+
+The map starts on northern Arizona. Pan and zoom to your riding area. A
+command window stays open behind the app while it runs. Close the app to
+close it.
 
 ## 1. Select the map and set the opacity
 

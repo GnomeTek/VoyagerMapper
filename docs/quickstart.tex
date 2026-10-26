@@ -2,6 +2,8 @@
 \documentclass[11pt,letterpaper]{article}
 \usepackage[margin=0.7in]{geometry}
 \usepackage{needspace}
+\usepackage{fancyvrb}
+\fvset{fontsize=\small}
 \usepackage{graphicx}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
@@ -13,30 +15,89 @@
 \usepackage[hidelinks]{hyperref}
 \usepackage{titlesec}
 \titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
-\titlespacing{\section}{0pt}{14pt}{6pt}
-\setlist[enumerate]{leftmargin=*, itemsep=2pt}
+\titlespacing{\section}{0pt}{12pt}{5pt}
+\titlespacing{\subsection}{0pt}{8pt}{3pt}
+\setlist[enumerate]{leftmargin=*, itemsep=1pt, topsep=2pt}
 \setlist[itemize]{leftmargin=*, itemsep=2pt}
 \graphicspath{{img/}}
 \definecolor{callout}{RGB}{220,30,30}
 \newcommand{\n}[1]{\textcolor{callout}{\textbf{(#1)}}}
 \newcommand{\btn}[1]{\textbf{#1}}
-\setlength{\parskip}{4pt}
+\setlength{\parskip}{3pt}
 \setlength{\parindent}{0pt}
 
 \begin{document}
 
-{\LARGE\bfseries VoyagerMapper quick start}
+{\LARGE\bfseries VoyagerMapper quick start}\hfill{\small v0.1.1}
 
 \vspace{2pt}
-Make a map file for the Trail Tech Voyager Pro in four steps. The default
-settings make a file that loads on the device. You do not have to change them.
+Install VoyagerMapper on Windows, then make a map file for the Trail Tech
+Voyager Pro in four steps. The default settings make a file that loads on the
+device. You do not have to change them.
 
-Start the app with \texttt{run\_gui.bat}. Pan and zoom the map to your riding area.
+\setcounter{section}{-1}
+\section{Install and start the app}
+
+You do this once. You need an internet connection. If you prefer an installer,
+download \texttt{voymap-setup-<version>.exe} from the Releases page at
+\url{https://github.com/GnomeTek/VoyagerMapper/releases} and skip to step 0.4.
+
+\subsection*{0.1 Install Python}
+\begin{enumerate}
+  \item Open \url{https://www.python.org/downloads/} and download Python for
+        Windows (3.10 or newer).
+  \item Start the installer.
+  \item On the first screen, check \btn{Add python.exe to PATH}.
+  \item Click \btn{Install Now} and wait for the installer to finish.
+\end{enumerate}
+If Python is already installed, skip this step.
+
+\subsection*{0.2 Download the source}
+\begin{enumerate}
+  \item Open \url{https://github.com/GnomeTek/VoyagerMapper}.
+  \item Click the green \btn{Code} button.
+  \item Click \btn{Download ZIP}.
+  \item Open the downloaded file \texttt{VoyagerMapper-main.zip} and extract it
+        to a folder you keep, for example
+        \texttt{C:\textbackslash Users\textbackslash <you>\textbackslash Documents\textbackslash VoyagerMapper}.
+\end{enumerate}
+The folder must contain \texttt{setup.bat}, \texttt{run\_gui.bat}, and
+\texttt{pyproject.toml}. If you use git, you can instead run
+\texttt{git clone https://github.com/GnomeTek/VoyagerMapper.git}.
+
+\subsection*{0.3 Run setup}
+\begin{enumerate}
+  \item Open the folder from step 0.2.
+  \item Double-click \btn{setup.bat}.
+\end{enumerate}
+A command window opens. The script makes a Python environment in a
+\texttt{.venv} subfolder, installs the app and its libraries (about 200\,MB,
+most of it the Qt map view), and runs the self-test. This takes a few minutes.
+The last lines you see are:
+\begin{verbatim}
+26 passed in ...s
+
+Setup complete. Double-click run_gui.bat to start voymap.
+Press any key to continue . . .
+\end{verbatim}
+Press a key to close the window. If the window shows \texttt{Setup failed},
+read the lines above it. The usual cause is that Python is not on the PATH:
+repeat step 0.1 and make sure the \btn{Add python.exe to PATH} box is checked.
+
+\needspace{8\baselineskip}
+\subsection*{0.4 Start the app}
+\begin{enumerate}
+  \item Double-click \btn{run\_gui.bat} in the same folder.
+  \item Wait for the window with the map to open.
+\end{enumerate}
+If you used the installer, start \btn{voymap} from the Start menu instead.
+The map starts on northern Arizona. Pan and zoom to your riding area. A command
+window stays open behind the app while it runs. Close the app to close it.
 
 \section{Select the map and set the opacity}
 
 \begin{center}
-\includegraphics[width=0.78\textwidth]{qs1_layers.png}
+\includegraphics[width=0.7\textwidth]{qs1_layers.png}
 \end{center}
 
 \begin{enumerate}
@@ -48,7 +109,7 @@ Start the app with \texttt{run\_gui.bat}. Pan and zoom the map to your riding ar
 \end{enumerate}
 
 \begin{center}
-\includegraphics[width=0.9\textwidth]{qs2_opacity.png}
+\includegraphics[width=0.8\textwidth]{qs2_opacity.png}
 \end{center}
 
 The slider also sets the opacity in the exported file. For a base map, keep the
