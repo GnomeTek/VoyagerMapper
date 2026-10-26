@@ -4,6 +4,9 @@ Lightweight Python map building application for the Trail Tech Voyager navigatio
 
 [![tests](https://github.com/GnomeTek/VoyagerMapper/actions/workflows/ci.yml/badge.svg)](https://github.com/GnomeTek/VoyagerMapper/actions/workflows/ci.yml)
 
+> **New here? See the quick start [HERE](docs/quickstart.pdf)** (PDF, 5 pages, with annotated
+> screenshots). Also available as [Markdown](docs/QUICKSTART.md).
+
 voymap builds MBTiles map files (and GPX files) for the Trail Tech Voyager Pro
 from public tile sources. It replaces the CalTopo export step: no Pro
 subscription, no 8,000-tile cap per export, and a local tile cache so a
@@ -19,8 +22,6 @@ What it does:
 * Writes an MBTiles file in the same layout as a CalTopo export that is known to
   load on the device (see "Output format" below).
 * Writes a GPX of your tracks and waypoints for the device's GPX import.
-
-**New here?** Read the [quick start](docs/QUICKSTART.md) (also as a [PDF](docs/quickstart.pdf)): four steps with annotated screenshots.
 
 ## Install
 
