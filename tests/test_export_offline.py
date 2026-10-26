@@ -71,7 +71,7 @@ def test_export_matches_reference_layout(tmp_path):
     assert data is not None
     im = Image.open(io.BytesIO(data)).convert("RGBA")
     # the red track passes through this tile: look for strongly red pixels
-    reds = sum(1 for px in im.get_flattened_data() if px[0] > 200 and px[1] < 90 and px[2] < 90)
+    reds = sum(n for n, px in im.getcolors(256 * 256) if px[0] > 200 and px[1] < 90 and px[2] < 90)
     assert reds > 20, reds
     # overlay blended at 50%: background should be a blue-ish mix, not pure base green
     bg = im.getpixel((3, 3))
@@ -130,7 +130,7 @@ def test_trim_coarse_makes_outside_transparent(tmp_path):
     from voymap.tilemath import lonlat_to_tile
     x, y = lonlat_to_tile(-111.65, 35.20, 9)
     im = Image.open(io.BytesIO(read_tile_xyz(tmp_path / "t.mbtiles", x, y, 9))).convert("RGBA")
-    alphas = {px[3] for px in im.get_flattened_data()}
+    alphas = {px[3] for _, px in im.getcolors(256 * 256)}
     assert 0 in alphas and 255 in alphas            # partly transparent, partly opaque
     x, y = lonlat_to_tile(-111.65, 35.20, 12)        # at/above the snap zoom: untouched
     im = Image.open(io.BytesIO(read_tile_xyz(tmp_path / "t.mbtiles", x, y, 12))).convert("RGBA")
